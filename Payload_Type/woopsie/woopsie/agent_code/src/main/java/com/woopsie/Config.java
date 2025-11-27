@@ -24,6 +24,13 @@ public class Config {
     private String proxyPass;
     private String aespsk;
     
+    // Profile-specific fields
+    private String profile;
+    private String callbackDomains;
+    private String domainRotation;
+    private int failoverThreshold;
+    private String rawC2Config;
+    
     public Config() {
     }
     
@@ -52,6 +59,13 @@ public class Config {
             config.proxyUser = props.getProperty("proxy_user", "");
             config.proxyPass = props.getProperty("proxy_pass", "");
             config.aespsk = props.getProperty("aespsk", "");
+            
+            // Profile-specific properties
+            config.profile = props.getProperty("profile", "http");
+            config.callbackDomains = props.getProperty("callback_domains", "");
+            config.domainRotation = props.getProperty("domain_rotation", "fail-over");
+            config.failoverThreshold = Integer.parseInt(props.getProperty("failover_threshold", "1"));
+            config.rawC2Config = props.getProperty("raw_c2_config", "");
         } catch (Exception e) {
             throw new RuntimeException("Failed to load configuration", e);
         }
@@ -150,6 +164,26 @@ public class Config {
     
     public String getAespsk() {
         return aespsk;
+    }
+    
+    public String getProfile() {
+        return profile;
+    }
+    
+    public String getCallbackDomains() {
+        return callbackDomains;
+    }
+    
+    public String getDomainRotation() {
+        return domainRotation;
+    }
+    
+    public int getFailoverThreshold() {
+        return failoverThreshold;
+    }
+    
+    public String getRawC2Config() {
+        return rawC2Config;
     }
     
     public static void debugLog(Config config, String message) {

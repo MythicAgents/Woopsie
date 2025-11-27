@@ -18,6 +18,13 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <jackson.version>2.18.2</jackson.version>
+        
+        <!-- Default values for profile configuration -->
+        <env.PROFILE>http</env.PROFILE>
+        <env.CALLBACK_DOMAINS></env.CALLBACK_DOMAINS>
+        <env.DOMAIN_ROTATION>fail-over</env.DOMAIN_ROTATION>
+        <env.FAILOVER_THRESHOLD>1</env.FAILOVER_THRESHOLD>
+        <env.RAW_C2_CONFIG></env.RAW_C2_CONFIG>
     </properties>
 
     <dependencies>

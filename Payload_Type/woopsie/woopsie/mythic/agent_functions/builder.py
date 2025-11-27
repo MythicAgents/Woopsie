@@ -99,6 +99,22 @@ class Woopsie(PayloadType):
             build_env = {}
             for key, val in c2_params.items():
                 if isinstance(val, str):
+                    # Handle raw_c2_config specially - fetch file content like oopsie
+                    if key == "raw_c2_config":
+                        response = await SendMythicRPCFileGetContent(MythicRPCFileGetContentMessage(val))
+                        if response.Success:
+                            val = response.Content.decode('utf-8')
+                            try:
+                                config = json.loads(val)
+                            except json.JSONDecodeError:
+                                resp.build_message = f"Failed to parse raw_c2_config JSON: {val}"
+                                resp.status = BuildStatus.Error
+                                return resp
+                            val = json.dumps(config)
+                        else:
+                            resp.build_message = "Failed to get raw C2 config file"
+                            resp.status = BuildStatus.Error
+                            return resp
                     build_env[key.upper()] = val
                 elif isinstance(val, (int, bool)):
                     build_env[key.upper()] = str(val)
@@ -107,6 +123,9 @@ class Woopsie(PayloadType):
                     if key == "headers":
                         build_env["USER_AGENT"] = val.get("User-Agent", "Mozilla/5.0")
                     # Store full dict as JSON too in case needed
+                    build_env[key.upper()] = json.dumps(val)
+                elif isinstance(val, list):
+                    # Handle lists (like callback_domains for httpx)
                     build_env[key.upper()] = json.dumps(val)
                 else:
                     build_env[key.upper()] = str(val)

