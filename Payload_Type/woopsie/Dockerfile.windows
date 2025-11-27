@@ -1,0 +1,76 @@
+# Windows GraalVM Native Image Builder for Woopsie Agent
+# This must be run on a Windows host with Docker Desktop (Windows containers mode)
+
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Install Chocolatey package manager
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Install Visual Studio Build Tools (required for native-image on Windows)
+# This includes MSVC compiler, Windows SDK, and build tools
+RUN choco install -y visualstudio2022buildtools --package-parameters \"--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --quiet --wait\"
+
+# Install Git (for Maven dependency resolution)
+RUN choco install -y git
+
+# Download and install GraalVM for Windows
+RUN Write-Host 'Downloading GraalVM...'; \
+    Invoke-WebRequest -Uri 'https://download.oracle.com/graalvm/21/latest/graalvm-jdk-21_windows-x64_bin.zip' -OutFile 'C:\graalvm.zip'; \
+    Write-Host 'Extracting GraalVM...'; \
+    Expand-Archive -Path 'C:\graalvm.zip' -DestinationPath 'C:\' -Force; \
+    Remove-Item 'C:\graalvm.zip' -Force; \
+    $graalvmDir = Get-ChildItem 'C:\' -Filter 'graalvm-jdk-21*' | Select-Object -First 1; \
+    Rename-Item $graalvmDir.FullName 'graalvm'; \
+    Write-Host 'GraalVM installed'
+
+# Set environment variables for GraalVM
+ENV JAVA_HOME=C:\graalvm
+ENV GRAALVM_HOME=C:\graalvm
+ENV PATH="C:\graalvm\bin;${PATH}"
+
+# Download and install Maven
+RUN Write-Host 'Downloading Maven...'; \
+    Invoke-WebRequest -Uri 'https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip' -OutFile 'C:\maven.zip'; \
+    Write-Host 'Extracting Maven...'; \
+    Expand-Archive -Path 'C:\maven.zip' -DestinationPath 'C:\' -Force; \
+    Remove-Item 'C:\maven.zip' -Force; \
+    Rename-Item 'C:\apache-maven-3.9.9' 'maven'; \
+    Write-Host 'Maven installed'
+
+# Set environment variables for Maven
+ENV MAVEN_HOME=C:\maven
+ENV PATH="C:\maven\bin;${PATH}"
+
+# Verify installations
+RUN Write-Host '=== Verifying Installations ==='; \
+    Write-Host 'Java Version:'; java -version; \
+    Write-Host 'Maven Version:'; mvn -v; \
+    Write-Host 'Native Image:'; native-image --version
+
+# Set up build directory
+WORKDIR C:\build
+
+# Copy agent code
+COPY woopsie/agent_code C:\build
+
+# Pre-download Maven dependencies to speed up builds
+RUN Write-Host 'Pre-downloading Maven dependencies...'; \
+    mvn dependency:go-offline -B; \
+    Write-Host 'Dependencies cached'
+
+# Default command: build native Windows executable
+# This will be overridden by build script but serves as documentation
+CMD ["powershell", "-Command", \
+     "Write-Host 'Building Windows native executable with GraalVM...'; \
+      mvn clean package -Pnative -DskipTests; \
+      if (Test-Path 'target\\woopsie.exe') { \
+          Write-Host 'Build successful: target\\woopsie.exe'; \
+          Get-Item 'target\\woopsie.exe' | Select-Object Name, Length \
+      } else { \
+          Write-Host 'Build failed: woopsie.exe not found'; \
+          exit 1 \
+      }"]

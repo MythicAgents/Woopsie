@@ -1,0 +1,37 @@
+{
+  "os": [
+    "Windows",
+    "Linux"
+  ],
+  "languages": [
+    "Java"
+  ],
+  "features": {
+    "mythic": [
+      "artifacts",
+      "browser scripts",
+      "file browser",
+      "file chunking",
+      "process browser",
+      "process responses"
+    ],
+    "custom": [
+      "key exchange",
+      "killdate"
+    ]
+  },
+  "payload_output": [
+    "jar",
+    "exe"
+  ],
+  "architectures": [
+    "x86_64"
+  ],
+  "c2": [
+    "http",
+    "httpx"
+  ],
+  "mythic_version": "3.4.6",
+  "agent_version": "0.1.0",
+  "supported_wrappers": []
+}
