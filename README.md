@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="Woopsie Logo" src="agent_icons/woopsie.svg" height="25%" width="25%">
+</p>
+
 # Woopsie - Java C2 Agent for Mythic
 
 Woopsie is a cross-platform Command & Control (C2) agent for the Mythic framework, written in Java. It supports both JAR and native executable compilation using GraalVM Native Image.
