@@ -229,15 +229,24 @@ class Woopsie(PayloadType):
         else:  # jar
             return original_filename + ".jar"
     
+    def _shell_quote(self, value):
+        """Safely quote a value for bash shell as a single-quoted string."""
+        if not isinstance(value, str):
+            value = str(value)
+        # Replace every single quote with: '\''
+        return "'" + value.replace("'", "'\\''") + "'"
+
     async def run_maven_build(self, build_env: dict) -> dict:
         """Run Maven JAR build"""
         try:
             # Merge build environment with system environment
             env = os.environ.copy()
             env.update(build_env)
-            
-            command = "mvn clean package -q"
-            
+
+            # Build the full shell command string with env vars, shell-quoted
+            env_str = ' '.join(f"{k}={self._shell_quote(v)}" for k, v in build_env.items())
+            command = f'{env_str} mvn clean package -q' if env_str else 'mvn clean package -q'
+
             process = await asyncio.create_subprocess_exec(
                 "mvn", "clean", "package", "-q",
                 cwd=str(self.agent_code_path),
@@ -245,17 +254,17 @@ class Woopsie(PayloadType):
                 stderr=asyncio.subprocess.PIPE,
                 env=env
             )
-            
+
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode != 0:
                 return {
                     "success": False,
                     "error": f"Maven failed with code {process.returncode}\n{stderr.decode()}"
                 }
-            
+
             return {"success": True, "command": command}
-            
+
         except Exception as e:
             return {"success": False, "error": str(e)}
     
@@ -267,18 +276,17 @@ class Woopsie(PayloadType):
             env.update(build_env)
             env["GRAALVM_HOME"] = "/opt/graalvm"
             env["JAVA_HOME"] = "/opt/graalvm"
-            
+
             # Configure for Windows cross-compilation if needed
-            # Note: Windows cross-compilation is experimental and may have limitations
-            # For production Windows builds, consider using a Windows build host
             if selected_os == "Windows":
-                # Set up MinGW cross-compilation toolchain for Windows
                 env["CC"] = "x86_64-w64-mingw32-gcc"
                 env["CXX"] = "x86_64-w64-mingw32-g++"
-            
-            command = f"mvn clean package -Pnative -Dos.detected={selected_os.lower()}"
-            
-            # Build the native image with Maven native profile
+
+            # Only include relevant env vars in the command string
+            relevant_keys = set(build_env.keys()) | {"GRAALVM_HOME", "JAVA_HOME", "CC", "CXX"}
+            env_str = ' '.join(f"{k}={self._shell_quote(env[k])}" for k in relevant_keys if k in env)
+            command = f'{env_str} mvn clean package -Pnative -Dos.detected={selected_os.lower()}' if env_str else f'mvn clean package -Pnative -Dos.detected={selected_os.lower()}'
+
             process = await asyncio.create_subprocess_exec(
                 "mvn",
                 "clean",
@@ -290,33 +298,32 @@ class Woopsie(PayloadType):
                 stderr=asyncio.subprocess.PIPE,
                 env=env
             )
-            
+
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode != 0:
                 return {
                     "success": False,
                     "error": f"Native build failed with code {process.returncode}\n{stderr.decode()}"
                 }
-            
-            # Determine native executable path based on OS
+
             if selected_os == "Windows":
                 native_path = self.agent_code_path / "target" / "woopsie.exe"
             else:
                 native_path = self.agent_code_path / "target" / "woopsie"
-            
+
             if not native_path.exists():
                 return {
                     "success": False,
                     "error": f"Native executable not found at {native_path}"
                 }
-            
+
             return {
                 "success": True,
                 "path": native_path,
                 "command": command
             }
-            
+
         except Exception as e:
             return {"success": False, "error": str(e)}
 
