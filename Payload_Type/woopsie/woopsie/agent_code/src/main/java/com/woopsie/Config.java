@@ -7,6 +7,32 @@ import java.util.Properties;
  * Configuration for Woopsie agent - uses compile-time baked values
  */
 public class Config {
+        @Override
+        public String toString() {
+            return "Config{" +
+                    "uuid='" + uuid + '\'' +
+                    ", callbackHost='" + callbackHost + '\'' +
+                    ", callbackPort=" + callbackPort +
+                    ", getUri='" + getUri + '\'' +
+                    ", postUri='" + postUri + '\'' +
+                    ", sleepInterval=" + sleepInterval +
+                    ", jitter=" + jitter +
+                    ", userAgent='" + userAgent + '\'' +
+                    ", debug=" + debug +
+                    ", encryptedExchangeCheck=" + encryptedExchangeCheck +
+                    ", killdate='" + killdate + '\'' +
+                    ", proxyHost='" + proxyHost + '\'' +
+                    ", proxyPort=" + proxyPort +
+                    ", proxyUser='" + proxyUser + '\'' +
+                    ", proxyPass='" + proxyPass + '\'' +
+                    ", aespsk='" + aespsk + '\'' +
+                    ", profile='" + profile + '\'' +
+                    ", callbackDomains='" + callbackDomains + '\'' +
+                    ", domainRotation='" + domainRotation + '\'' +
+                    ", failoverThreshold=" + failoverThreshold +
+                    ", rawC2Config='" + rawC2Config + '\'' +
+                    '}';
+        }
     private String callbackHost;
     private int callbackPort;
     private String getUri;
@@ -41,36 +67,40 @@ public class Config {
         try (InputStream input = Config.class.getClassLoader().getResourceAsStream("config.properties")) {
             Properties props = new Properties();
             props.load(input);
-            
-            config.uuid = props.getProperty("uuid");
-            config.callbackHost = props.getProperty("callback_host");
-            config.callbackPort = Integer.parseInt(props.getProperty("callback_port"));
-            config.getUri = props.getProperty("get_uri");
-            config.postUri = props.getProperty("post_uri");
-            config.sleepInterval = Integer.parseInt(props.getProperty("callback_interval")) * 1000; // Convert to ms
-            config.jitter = Integer.parseInt(props.getProperty("callback_jitter"));
-            config.userAgent = props.getProperty("user_agent");
-            config.debug = Boolean.parseBoolean(props.getProperty("debug", "false"));
-            config.encryptedExchangeCheck = Boolean.parseBoolean(props.getProperty("encrypted_exchange_check", "false"));
-            config.killdate = props.getProperty("killdate", "");
-            config.proxyHost = props.getProperty("proxy_host", "");
-            String proxyPortStr = props.getProperty("proxy_port", "0");
+
+            config.uuid = trimOrNull(props.getProperty("uuid"));
+            config.callbackHost = trimOrNull(props.getProperty("callback_host"));
+            config.callbackPort = Integer.parseInt(props.getProperty("callback_port").trim());
+            config.getUri = trimOrNull(props.getProperty("get_uri"));
+            config.postUri = trimOrNull(props.getProperty("post_uri"));
+            config.sleepInterval = Integer.parseInt(props.getProperty("callback_interval").trim()) * 1000; // Convert to ms
+            config.jitter = Integer.parseInt(props.getProperty("callback_jitter").trim());
+            config.userAgent = trimOrNull(props.getProperty("user_agent"));
+            config.debug = Boolean.parseBoolean(props.getProperty("debug", "false").trim());
+            config.encryptedExchangeCheck = Boolean.parseBoolean(props.getProperty("encrypted_exchange_check", "false").trim());
+            config.killdate = trimOrNull(props.getProperty("killdate", ""));
+            config.proxyHost = trimOrNull(props.getProperty("proxy_host", ""));
+            String proxyPortStr = props.getProperty("proxy_port", "0").trim();
             config.proxyPort = proxyPortStr.isEmpty() ? 0 : Integer.parseInt(proxyPortStr);
-            config.proxyUser = props.getProperty("proxy_user", "");
-            config.proxyPass = props.getProperty("proxy_pass", "");
-            config.aespsk = props.getProperty("aespsk", "");
-            
+            config.proxyUser = trimOrNull(props.getProperty("proxy_user", ""));
+            config.proxyPass = trimOrNull(props.getProperty("proxy_pass", ""));
+            config.aespsk = trimOrNull(props.getProperty("aespsk", ""));
+
             // Profile-specific properties
-            config.profile = props.getProperty("profile", "http");
-            config.callbackDomains = props.getProperty("callback_domains", "");
-            config.domainRotation = props.getProperty("domain_rotation", "fail-over");
-            config.failoverThreshold = Integer.parseInt(props.getProperty("failover_threshold", "1"));
-            config.rawC2Config = props.getProperty("raw_c2_config", "");
+            config.profile = trimOrNull(props.getProperty("profile", "http"));
+            config.callbackDomains = trimOrNull(props.getProperty("callback_domains", ""));
+            config.domainRotation = trimOrNull(props.getProperty("domain_rotation", "fail-over"));
+            config.failoverThreshold = Integer.parseInt(props.getProperty("failover_threshold", "1").trim());
+            config.rawC2Config = trimOrNull(props.getProperty("raw_c2_config", ""));
         } catch (Exception e) {
             throw new RuntimeException("Failed to load configuration", e);
         }
-        
+
         return config;
+    }
+
+    private static String trimOrNull(String s) {
+        return s == null ? null : s.trim();
     }
     
     public String getCallbackHost() {

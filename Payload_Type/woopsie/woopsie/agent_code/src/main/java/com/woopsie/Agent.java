@@ -453,8 +453,7 @@ public class Agent {
         // Parse configuration from compile-time baked properties
         Config config = Config.fromResource();
         Config.debugLog(config, "Loading configuration...");
-        Config.debugLog(config, "Config loaded - UUID: " + config.getUuid());
-        Config.debugLog(config, "Callback: " + config.getCallbackUrl());
+        Config.debugLog(config, config.toString());
         
         // Create and start agent
         Agent agent = new Agent(config);
