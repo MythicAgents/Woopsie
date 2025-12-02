@@ -7,6 +7,8 @@ import sys
 import tempfile
 import traceback
 from pathlib import Path
+import asyncssh
+import aiofiles
 from mythic_container.PayloadBuilder import *
 from mythic_container.MythicRPC import *
 
@@ -51,6 +53,36 @@ class Woopsie(PayloadType):
             default_value=True,
             required=False,
         ),
+        BuildParameter(
+            name="windows_build_host",
+            parameter_type=BuildParameterType.String,
+            description="Remote Windows VM hostname/IP for native builds.",
+            default_value="127.0.0.1",
+            hide_conditions=[
+                HideCondition(name="output", operand=HideConditionOperand.NotEQ, value="native")
+            ],
+            supported_os=["Windows"]
+        ),
+        BuildParameter(
+            name="windows_build_user",
+            parameter_type=BuildParameterType.String,
+            description="SSH username for remote Windows VM.",
+            default_value="localuser",
+            hide_conditions=[
+                HideCondition(name="output", operand=HideConditionOperand.NotEQ, value="native")
+            ],
+            supported_os=["Windows"]
+        ),
+        BuildParameter(
+            name="windows_build_pass",
+            parameter_type=BuildParameterType.String,
+            description="SSH password for remote Windows VM.",
+            default_value="password",
+            hide_conditions=[
+                HideCondition(name="output", operand=HideConditionOperand.NotEQ, value="native")
+            ],
+            supported_os=["Windows"]
+        ),
     ]
     
     c2_profiles = ["http", "httpx"]
@@ -65,6 +97,12 @@ class Woopsie(PayloadType):
     agent_path = pathlib.Path(".") / "woopsie" / "mythic"
     agent_code_path = pathlib.Path(".") / "woopsie" / "agent_code"
     agent_icon_path = agent_path / "agent_icon" / "woopsie.svg"
+
+    build_steps = [
+        BuildStep(step_name="Configuration", step_description="Preparing build configuration"),
+        BuildStep(step_name="Compiling", step_description="Building payload with Maven"),
+        BuildStep(step_name="Finalizing", step_description="Packaging final payload"),
+    ]
     
     async def build(self) -> BuildResponse:
         resp = BuildResponse(status=BuildStatus.Error)
@@ -72,6 +110,8 @@ class Woopsie(PayloadType):
             # Get build parameters
             output_format = self.get_parameter("output")
             selected_os = self.selected_os  # Get selected OS from Mythic
+            
+            resp.build_message += f"Building {output_format} payload for {selected_os}...\n"
 
             # Set file extension based on output format and OS
             if output_format == "native":
@@ -134,6 +174,13 @@ class Woopsie(PayloadType):
             if "USER_AGENT" not in build_env:
                 build_env["USER_AGENT"] = "Mozilla/5.0"
 
+            await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Configuration",
+                StepStdout="Successfully prepared build configuration",
+                StepSuccess=True
+            ))
+
             # Add build environment to message for visibility
             resp.build_message += "\nBuild Configuration:\n"
             for key, value in build_env.items():
@@ -148,60 +195,105 @@ class Woopsie(PayloadType):
                     resp.build_message += "Offloading Windows native build to remote VM via SSH...\n"
                     await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                         PayloadUUID=self.uuid,
-                        StepName="Remote Windows Build",
+                        StepName="Compiling",
                         StepStdout="Connecting to remote Windows build VM...",
                         StepSuccess=True
                     ))
-                    build_result = await self.run_remote_windows_build(build_env)
+                    # Get remote build parameters
+                    remote_config = {
+                        "host": self.get_parameter("windows_build_host"),
+                        "user": self.get_parameter("windows_build_user"),
+                        "pass": self.get_parameter("windows_build_pass")
+                    }
+                    build_result = await self.run_remote_windows_build(build_env, remote_config)
                     if not build_result["success"]:
-                        resp.build_message += f"\nRemote Windows build failed: {build_result['error']}"
+                        resp.build_message += f"\nRemote Windows build failed: {build_result['error']}\n"
                         resp.status = BuildStatus.Error
+                        await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling",
+                            StepStdout=f"Build failed: {build_result['error']}",
+                            StepSuccess=False
+                        ))
                         return resp
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Compiling",
+                        StepStdout="Successfully built native Windows executable",
+                        StepSuccess=True
+                    ))
                     resp.build_message += f"Remote build command: {build_result['command']}\n"
                     output_path = build_result["path"]
                 else:
                     # Linux: Use GraalVM Native Image
                     resp.build_message += f"Building native {selected_os} executable with GraalVM...\n"
-                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                        PayloadUUID=self.uuid,
-                        StepName="Compiling Native Image",
-                        StepStdout=f"Building native executable for {selected_os}...",
-                        StepSuccess=True
-                    ))
                     build_result = await self.run_native_build(selected_os, build_env)
                     if not build_result["success"]:
-                        resp.build_message += f"\nNative build failed: {build_result['error']}"
+                        resp.build_message += f"\nNative build failed: {build_result['error']}\n"
                         resp.status = BuildStatus.Error
+                        await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                            PayloadUUID=self.uuid,
+                            StepName="Compiling",
+                            StepStdout=f"Build failed: {build_result['error']}",
+                            StepSuccess=False
+                        ))
                         return resp
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Compiling",
+                        StepStdout=f"Successfully built native {selected_os} executable",
+                        StepSuccess=True
+                    ))
                     resp.build_message += f"Build command: {build_result['command']}\n"
                     output_path = build_result["path"]
             else:
                 resp.build_message += "Building JAR with Maven...\n"
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Compiling JAR",
-                    StepStdout="Running Maven build...",
-                    StepSuccess=True
-                ))
                 build_result = await self.run_maven_build(build_env)
                 if not build_result["success"]:
-                    resp.build_message += f"\nMaven build failed: {build_result['error']}"
+                    resp.build_message += f"\nMaven build failed: {build_result['error']}\n"
                     resp.status = BuildStatus.Error
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Compiling",
+                        StepStdout=f"Build failed: {build_result['error']}",
+                        StepSuccess=False
+                    ))
                     return resp
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                    PayloadUUID=self.uuid,
+                    StepName="Compiling",
+                    StepStdout="Successfully built JAR with Maven",
+                    StepSuccess=True
+                ))
+                resp.build_message += f"Build command: {build_result['command']}\n"
                 resp.build_message += f"Build command: {build_result['command']}\n"
                 jar_path = self.agent_code_path / "target" / "woopsie.jar"
                 if not jar_path.exists():
-                    resp.build_message = "JAR file not found after build"
+                    resp.build_message += "JAR file not found after build\n"
                     resp.status = BuildStatus.Error
+                    await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Finalizing",
+                        StepStdout="JAR file not found after build",
+                        StepSuccess=False
+                    ))
                     return resp
                 output_path = jar_path
 
             # Read the final payload
+            resp.build_message += "Reading final payload...\n"
             with open(output_path, "rb") as f:
                 resp.payload = f.read()
 
+            await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Finalizing",
+                StepStdout=f"Successfully packaged {output_format} payload",
+                StepSuccess=True
+            ))
+
             resp.status = BuildStatus.Success
-            resp.build_message += f"Successfully built {output_format} payload"
+            resp.build_message += f"\n✓ Successfully built {output_format} payload for {selected_os}\n"
 
             # Adjust filename based on output format and OS
             if self.get_parameter("adjust_filename"):
@@ -214,27 +306,54 @@ class Woopsie(PayloadType):
         return resp
         
 
-    async def run_remote_windows_build(self, build_env: dict) -> dict:
+    async def run_remote_windows_build(self, build_env: dict, remote_config: dict) -> dict:
         """Offload Windows native build to remote VM via SSH and fetch the .exe"""
-        import asyncssh
-        import aiofiles
-        remote_host = "10.4.10.11"
-        remote_user = "localuser"
-        remote_pass = "password"
+        # Get configuration from parameters
+        remote_host = remote_config["host"]
+        remote_user = remote_config["user"]
+        remote_pass = remote_config["pass"]
         remote_dir = "C:/woopsie/agent_code"
         remote_target = f"{remote_dir}/target/woopsie.exe"
         local_target = self.agent_code_path / "target" / "woopsie.exe"
         build_cmd = "mvn clean package -Pnative -Dos.detected=windows"
-        # Prepare env vars for Windows shell
-        env_str = ' '.join(f"set {k}={v} &&" for k, v in build_env.items())
+        
+        # Prepare env vars for Windows batch - properly escape values
+        def escape_batch_value(key, value):
+            """Escape special characters for Windows batch set command"""
+            value = str(value)
+            
+            # Special handling for JSON values (AESPSK, HEADERS, etc.) - don't add extra quotes
+            if value.strip().startswith('{') and value.strip().endswith('}'):
+                # Just escape special batch characters, no outer quotes
+                value = value.replace('&', '^&').replace('|', '^|').replace('<', '^<').replace('>', '^>')
+                value = value.replace('(', '^(').replace(')', '^)').replace('%', '%%')
+                return value
+            
+            # Regular string escaping
+            value = value.replace('&', '^&').replace('|', '^|').replace('<', '^<').replace('>', '^>')
+            value = value.replace('(', '^(').replace(')', '^)').replace('%', '%%')
+            # Quote if contains spaces
+            if ' ' in value:
+                value = f'"{value}"'
+            return value
+        
+        env_str = ' '.join(f"set {k}={escape_batch_value(k, v)} &&" for k, v in build_env.items())
         remote_command = f"cd {remote_dir} && {env_str} {build_cmd}"
-        import os
+
         try:
-            async with asyncssh.connect(remote_host, username=remote_user, password=remote_pass, known_hosts=None) as conn:
+            async with asyncssh.connect(
+                remote_host, 
+                username=remote_user, 
+                password=remote_pass, 
+                known_hosts=None,
+                connect_timeout=30
+            ) as conn:
+                # Ensure parent directory exists
+                await conn.run('if not exist "C:\\woopsie" mkdir "C:\\woopsie"', check=False)
                 # Remove remote agent_code directory if it exists
-                await conn.run(f'rmdir /S /Q "C:\\woopsie\\agent_code"', check=False)
-                # Recreate the directory
-                await conn.run(f'mkdir "C:\\woopsie\\agent_code"', check=True)
+                await conn.run(f'rmdir /S /Q "{remote_dir}"', check=False)
+                # Create the directory
+                await conn.run(f'mkdir "{remote_dir}"', check=True)
                 # Recursively upload local agent_code to remote
                 async with conn.start_sftp_client() as sftp:
                     for root, dirs, files in os.walk(self.agent_code_path):
@@ -249,8 +368,8 @@ class Woopsie(PayloadType):
                             remote_file = f'{remote_root}/{file}'
                             async with aiofiles.open(local_file, "rb") as lf, sftp.open(remote_file, "wb") as rf:
                                 await rf.write(await lf.read())
-                # Run the build command
-                result = await conn.run(remote_command, check=False)
+                # Run the build command with timeout (10 minutes for native build)
+                result = await conn.run(remote_command, check=False, timeout=600)
                 if result.exit_status != 0:
                     error_msg = f"Remote build failed with exit code {result.exit_status}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
                     return {"success": False, "error": error_msg, "command": remote_command}
@@ -265,8 +384,12 @@ class Woopsie(PayloadType):
                 if not local_target.exists():
                     return {"success": False, "error": f"Failed to fetch {remote_target}", "command": remote_command}
                 return {"success": True, "path": local_target, "command": remote_command}
+        except asyncssh.Error as e:
+            return {"success": False, "error": f"SSH connection failed: {str(e)}", "command": remote_command}
+        except asyncio.TimeoutError:
+            return {"success": False, "error": "Build timeout (exceeded 10 minutes)", "command": remote_command}
         except Exception as e:
-            return {"success": False, "error": str(e), "command": remote_command}
+            return {"success": False, "error": f"Unexpected error: {str(e)}", "command": remote_command}
     
     def adjust_file_name(self, filename, output_type, selected_os):
         """Adjust filename based on output type and OS"""
@@ -312,9 +435,11 @@ class Woopsie(PayloadType):
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
+                stdout_text = stdout.decode() if stdout else ""
+                stderr_text = stderr.decode() if stderr else ""
                 return {
                     "success": False,
-                    "error": f"Maven failed with code {process.returncode}\n{stderr.decode()}"
+                    "error": f"Maven failed with code {process.returncode}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}"
                 }
 
             return {"success": True, "command": command}
@@ -356,9 +481,11 @@ class Woopsie(PayloadType):
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
+                stdout_text = stdout.decode() if stdout else ""
+                stderr_text = stderr.decode() if stderr else ""
                 return {
                     "success": False,
-                    "error": f"Native build failed with code {process.returncode}\n{stderr.decode()}"
+                    "error": f"Native build failed with code {process.returncode}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}"
                 }
 
             if selected_os == "Windows":

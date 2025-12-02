@@ -11,11 +11,12 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public class BackgroundTask {
     public final String taskId;  // Make public for background task access
+    public final String parameters;  // Make public for background task access
     private final String command;
-    private final String parameters;
     private final Thread thread;
     private final BlockingQueue<JsonNode> toTask;      // Main -> Task (like oopsie's job_rx)
     private final BlockingQueue<Map<String, Object>> fromTask;  // Task -> Main (like oopsie's job_tx)
+    private final BlockingQueue<Map<String, Object>> interactiveMessages;  // Interactive messages (PTY, SOCKS)
     public volatile boolean running;  // Make public for background task access
     
     public BackgroundTask(String taskId, String command, String parameters, Runnable taskRunnable) {
@@ -24,6 +25,7 @@ public class BackgroundTask {
         this.parameters = parameters;
         this.toTask = new LinkedBlockingQueue<>();
         this.fromTask = new LinkedBlockingQueue<>();
+        this.interactiveMessages = new LinkedBlockingQueue<>();
         this.running = true;
         this.thread = new Thread(taskRunnable);
         this.thread.setDaemon(true);
@@ -77,10 +79,34 @@ public class BackgroundTask {
     }
     
     /**
+     * Send an interactive message (PTY, SOCKS)
+     * Interactive messages go at the top level of post_response, not inside responses array
+     */
+    public void sendInteractive(Map<String, Object> interactive) {
+        try {
+            interactiveMessages.put(interactive);
+            System.out.println("[BackgroundTask] Queued interactive message for task " + taskId + ": " + interactive);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+    
+    /**
      * Poll for responses from the task (non-blocking)
      */
     public Map<String, Object> pollResponse() {
         return fromTask.poll();
+    }
+    
+    /**
+     * Poll for interactive messages (non-blocking)
+     */
+    public Map<String, Object> pollInteractive() {
+        Map<String, Object> msg = interactiveMessages.poll();
+        if (msg != null) {
+            System.out.println("[BackgroundTask] Polled interactive message from task " + taskId + ": " + msg);
+        }
+        return msg;
     }
     
     /**

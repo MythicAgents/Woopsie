@@ -38,6 +38,7 @@ public class TaskManager {
         registerTask(new RmTask());
         registerTask(new SleepTask());
         registerTask(new SocksTask());
+        registerTask(new PtyTask());
         registerTask(exitTask);
     }
     

