@@ -1,6 +1,10 @@
 package com.woopsie;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -17,7 +21,6 @@ public class Config {
                     ", postUri='" + postUri + '\'' +
                     ", sleepInterval=" + sleepInterval +
                     ", jitter=" + jitter +
-                    ", userAgent='" + userAgent + '\'' +
                     ", debug=" + debug +
                     ", encryptedExchangeCheck=" + encryptedExchangeCheck +
                     ", killdate='" + killdate + '\'' +
@@ -40,7 +43,7 @@ public class Config {
     private int sleepInterval;
     private int jitter;
     private String uuid;
-    private String userAgent;
+    private Map<String, String> headers;
     private boolean debug;
     private boolean encryptedExchangeCheck;
     private String killdate;
@@ -70,18 +73,39 @@ public class Config {
 
             config.uuid = trimOrNull(props.getProperty("uuid"));
             config.callbackHost = trimOrNull(props.getProperty("callback_host"));
-            config.callbackPort = Integer.parseInt(props.getProperty("callback_port").trim());
+            
+            // Parse callback_port - may not be set for httpx profile
+            String callbackPortStr = trimOrNull(props.getProperty("callback_port", "0"));
+            config.callbackPort = (callbackPortStr == null) ? 0 : Integer.parseInt(callbackPortStr);
+            
             config.getUri = trimOrNull(props.getProperty("get_uri"));
             config.postUri = trimOrNull(props.getProperty("post_uri"));
             config.sleepInterval = Integer.parseInt(props.getProperty("callback_interval").trim()) * 1000; // Convert to ms
             config.jitter = Integer.parseInt(props.getProperty("callback_jitter").trim());
-            config.userAgent = trimOrNull(props.getProperty("user_agent"));
+            
+            // Parse headers JSON if present
+            String headersJson = trimOrNull(props.getProperty("headers"));
+            if (headersJson != null && !headersJson.isEmpty()) {
+                try {
+                    ObjectMapper mapper = new ObjectMapper();
+                    config.headers = mapper.readValue(headersJson, new TypeReference<Map<String, String>>(){});
+                } catch (Exception e) {
+                    // If parsing fails, just use default empty map
+                    config.headers = new HashMap<>();
+                }
+            } else {
+                config.headers = new HashMap<>();
+            }
+            
             config.debug = Boolean.parseBoolean(props.getProperty("debug", "false").trim());
             config.encryptedExchangeCheck = Boolean.parseBoolean(props.getProperty("encrypted_exchange_check", "false").trim());
             config.killdate = trimOrNull(props.getProperty("killdate", ""));
             config.proxyHost = trimOrNull(props.getProperty("proxy_host", ""));
-            String proxyPortStr = props.getProperty("proxy_port", "0").trim();
-            config.proxyPort = proxyPortStr.isEmpty() ? 0 : Integer.parseInt(proxyPortStr);
+            
+            // Parse proxy_port - may not be set for httpx profile
+            String proxyPortStr = trimOrNull(props.getProperty("proxy_port", "0"));
+            config.proxyPort = (proxyPortStr == null) ? 0 : Integer.parseInt(proxyPortStr);
+            
             config.proxyUser = trimOrNull(props.getProperty("proxy_user", ""));
             config.proxyPass = trimOrNull(props.getProperty("proxy_pass", ""));
             config.aespsk = trimOrNull(props.getProperty("aespsk", ""));
@@ -90,7 +114,11 @@ public class Config {
             config.profile = trimOrNull(props.getProperty("profile", "http"));
             config.callbackDomains = trimOrNull(props.getProperty("callback_domains", ""));
             config.domainRotation = trimOrNull(props.getProperty("domain_rotation", "fail-over"));
-            config.failoverThreshold = Integer.parseInt(props.getProperty("failover_threshold", "1").trim());
+            
+            // Parse failover_threshold - may not be set for http profile
+            String failoverThresholdStr = trimOrNull(props.getProperty("failover_threshold", "1"));
+            config.failoverThreshold = (failoverThresholdStr == null) ? 1 : Integer.parseInt(failoverThresholdStr);
+            
             config.rawC2Config = trimOrNull(props.getProperty("raw_c2_config", ""));
         } catch (Exception e) {
             throw new RuntimeException("Failed to load configuration", e);
@@ -100,7 +128,11 @@ public class Config {
     }
 
     private static String trimOrNull(String s) {
-        return s == null ? null : s.trim();
+        if (s == null) return null;
+        s = s.trim();
+        // If Maven didn't substitute the variable (starts with ${env.), treat as empty
+        if (s.startsWith("${env.")) return null;
+        return s.isEmpty() ? null : s;
     }
     
     public String getCallbackHost() {
@@ -147,10 +179,19 @@ public class Config {
     }
     
     public String getUserAgent() {
-        return userAgent;
+        return headers != null ? headers.get("User-Agent") : null;
+    }
+    
+    public Map<String, String> getHeaders() {
+        return headers;
     }
     
     public String getCallbackUrl() {
+        // For httpx profile, callback_host/port may not be set
+        if (callbackHost == null || callbackHost.isEmpty()) {
+            return null;
+        }
+        
         // callback_host from Mythic already includes the protocol (http:// or https://)
         // so we don't need to prepend it
         if (callbackHost.startsWith("http://") || callbackHost.startsWith("https://")) {

