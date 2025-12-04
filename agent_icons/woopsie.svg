@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:v="https://svgstorm.com" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g transform="scale(-1,1) translate(-1024,0)">
+
 <g fill="None" fill-opacity="0.0" stroke="#FDFEFD" stroke-opacity="1.00" stroke-width="0.3">
 </g>
 <g fill="None" fill-opacity="0.0" stroke="#8D8B85" stroke-opacity="1.00" stroke-width="0.3"><path d="
@@ -3173,4 +3175,5 @@ M 479.00 910.00
 C 475.07 910.15 470.92 910.27 467.00 910.00
 C 470.98 910.71 474.99 910.57 479.00 910.00 Z" data-index="295"></path>
 </g>
+  </g>
 </svg>
