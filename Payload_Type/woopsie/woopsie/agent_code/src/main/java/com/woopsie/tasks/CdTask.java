@@ -36,7 +36,18 @@ public class CdTask implements Task {
         
         // Resolve the new path
         Path newPath;
-        if (path.startsWith("\\\\") || (path.length() > 1 && path.charAt(1) == ':')) {
+        // Detect UNC paths - proper format or malformed single backslash
+        boolean isUncPath = path.startsWith("\\\\");
+        
+        // Also check for malformed UNC paths from JSON parsing: \\host becomes \host
+        if (!isUncPath && path.startsWith("\\") && path.length() > 2 && path.charAt(1) != ':') {
+            // Fix malformed UNC path by adding missing backslash
+            path = "\\" + path;
+            isUncPath = true;
+            Config.debugLog(config, "Fixed malformed UNC path: " + path);
+        }
+        
+        if (isUncPath || (path.length() > 1 && path.charAt(1) == ':')) {
             // Absolute path (UNC or drive letter)
             newPath = Paths.get(path);
         } else {
@@ -46,16 +57,21 @@ public class CdTask implements Task {
         
         // Convert to File and verify it exists and is a directory
         File dir = newPath.toFile();
+        
+        // For UNC paths, use the original path string for error messages to avoid corruption
+        String pathForDisplay = isUncPath ? path : newPath.toAbsolutePath().toString();
+        
         if (!dir.exists()) {
-            throw new Exception("Directory does not exist: " + newPath.toAbsolutePath());
+            throw new Exception("Directory does not exist: " + pathForDisplay);
         }
         
         if (!dir.isDirectory()) {
-            throw new Exception("Path is not a directory: " + newPath.toAbsolutePath());
+            throw new Exception("Path is not a directory: " + pathForDisplay);
         }
         
         // Change the current directory
-        String absolutePath = dir.getAbsolutePath();
+        // For UNC paths, prefer the canonical path to ensure proper representation
+        String absolutePath = isUncPath ? dir.getCanonicalPath() : dir.getAbsolutePath();
         System.setProperty("user.dir", absolutePath);
         
         Config.debugLog(config, "Changed directory to: " + absolutePath);

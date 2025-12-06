@@ -150,7 +150,14 @@ public class LsTask implements Task {
         fileInfo.put("is_file", attrs.isRegularFile());
         fileInfo.put("permissions", getFilePermissions(path));
         fileInfo.put("name", path.getFileName().toString());
-        fileInfo.put("full_name", path.toAbsolutePath().toString());
+        // Use canonical path to properly handle UNC paths
+        String fullName;
+        try {
+            fullName = path.toFile().getCanonicalPath();
+        } catch (Exception e) {
+            fullName = path.toString();
+        }
+        fileInfo.put("full_name", fullName);
         
         // Timestamps in milliseconds
         fileInfo.put("access_time", attrs.lastAccessTime().toMillis());

@@ -52,14 +52,26 @@ public class PtyBackgroundTask implements Runnable {
     
     private Process shellProcess;
     private OutputStream processInput;
+    private final com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken;
     
-    public PtyBackgroundTask(BackgroundTask task, Config config) {
+    public PtyBackgroundTask(BackgroundTask task, Config config, com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken) {
         this.task = task;
         this.config = config;
+        this.impersonationToken = impersonationToken;
     }
     
     @Override
     public void run() {
+        // Re-apply impersonation token if present (each thread needs its own token applied)
+        if (impersonationToken != null) {
+            try {
+                Config.debugLog(config, "Re-applying impersonation token in pty background thread");
+                com.woopsie.utils.WindowsAPI.reApplyToken(impersonationToken);
+            } catch (Exception e) {
+                Config.debugLog(config, "[PTY] Failed to apply impersonation token: " + e.getMessage());
+            }
+        }
+        
         Config.debugLog(config, "[PTY] PTY thread started for task " + task.taskId);
         
         try {

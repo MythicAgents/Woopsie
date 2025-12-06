@@ -24,6 +24,15 @@ public class CatTask implements Task {
         Config.debugLog(config, "Cat request - path: '" + path + "'");
         
         // Resolve path
+        boolean isUncPath = path.startsWith("\\\\");
+        
+        // Fix malformed UNC paths from JSON parsing: \\host becomes \host
+        if (!isUncPath && path.startsWith("\\") && path.length() > 2 && path.charAt(1) != ':') {
+            path = "\\" + path;
+            isUncPath = true;
+            Config.debugLog(config, "Fixed malformed UNC path: " + path);
+        }
+        
         Path filePath = Paths.get(path);
         Config.debugLog(config, "Initial path object: " + filePath);
         
@@ -33,9 +42,12 @@ public class CatTask implements Task {
             Config.debugLog(config, "Resolved relative to CWD (" + cwd + "): " + filePath);
         }
         
+        // For UNC paths, use original path string for error messages
+        String pathForDisplay = isUncPath ? path : filePath.toAbsolutePath().toString();
+        
         // Check if file exists
         if (!Files.exists(filePath)) {
-            throw new Exception("File does not exist: " + filePath.toAbsolutePath());
+            throw new Exception("File does not exist: " + pathForDisplay);
         }
         
         // Get real path

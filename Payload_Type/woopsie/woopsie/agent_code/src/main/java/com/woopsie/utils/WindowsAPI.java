@@ -409,11 +409,7 @@ public class WindowsAPI {
             System.err.println("[DEBUG] makeToken: getImpersonatedUsername() returned: " + currentUser);
             
             String logonTypeStr = netOnly ? "NetOnly" : "Interactive";
-            String warning = "";
-            if (netOnly) {
-                warning = " [WARNING: NetOnly logon does NOT change local security context - commands like 'ls' will still run as original user. Only network connections use new credentials.]";
-            }
-            return new TokenResult(token, String.format("Successfully impersonated %s (%s logon)%s", currentUser, logonTypeStr, warning));
+            return new TokenResult(token, String.format("Successfully impersonated %s (%s logon)", currentUser, logonTypeStr));
             
         } catch (Exception e) {
             Kernel32Ext.INSTANCE.CloseHandle(token);

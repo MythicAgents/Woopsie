@@ -31,6 +31,15 @@ public class DownloadTask implements Task {
         Config.debugLog(config, "Download request - path: '" + path + "', file: '" + file + "', host: '" + host + "'");
         
         // Resolve path
+        boolean isUncPath = path.startsWith("\\\\");
+        
+        // Fix malformed UNC paths from JSON parsing
+        if (!isUncPath && path.startsWith("\\") && path.length() > 2 && path.charAt(1) != ':') {
+            path = "\\" + path;
+            isUncPath = true;
+            Config.debugLog(config, "Fixed malformed UNC path: " + path);
+        }
+        
         Path filePath = Paths.get(path);
         Config.debugLog(config, "Initial path object: " + filePath);
         
@@ -40,9 +49,12 @@ public class DownloadTask implements Task {
             Config.debugLog(config, "Resolved relative to CWD (" + cwd + "): " + filePath);
         }
         
+        // For UNC paths, use original path string for error messages
+        String pathForDisplay = isUncPath ? path : filePath.toAbsolutePath().toString();
+        
         // Check if file exists before calling toRealPath
         if (!Files.exists(filePath)) {
-            throw new Exception("File does not exist: " + filePath.toAbsolutePath() + " (original: " + path + ")");
+            throw new Exception("File does not exist: " + pathForDisplay + " (original: " + path + ")");
         }
         
         // Now safe to call toRealPath

@@ -38,6 +38,15 @@ public class UploadTask implements Task {
         }
         
         // Resolve path
+        boolean isUncPath = remotePath.startsWith("\\\\");
+        
+        // Fix malformed UNC paths from JSON parsing
+        if (!isUncPath && remotePath.startsWith("\\") && remotePath.length() > 2 && remotePath.charAt(1) != ':') {
+            remotePath = "\\" + remotePath;
+            isUncPath = true;
+            Config.debugLog(config, "Fixed malformed UNC path: " + remotePath);
+        }
+        
         Path filePath = Paths.get(remotePath);
         Config.debugLog(config, "Initial path object: " + filePath);
         
@@ -47,13 +56,16 @@ public class UploadTask implements Task {
             Config.debugLog(config, "Resolved relative to CWD (" + cwd + "): " + filePath);
         }
         
+        // For UNC paths, use original path string for error messages
+        String pathForDisplay = isUncPath ? remotePath : filePath.toAbsolutePath().toString();
+        
         // Check if file already exists
         if (Files.exists(filePath)) {
-            throw new Exception("Remote path already exists: " + filePath.toAbsolutePath());
+            throw new Exception("Remote path already exists: " + pathForDisplay);
         }
         
-        // Get absolute path for tracking
-        String fullPath = filePath.toAbsolutePath().toString();
+        // Get absolute path for tracking (use File.getCanonicalPath for UNC paths)
+        String fullPath = isUncPath ? filePath.toFile().getCanonicalPath() : filePath.toAbsolutePath().toString();
         Config.debugLog(config, "Upload will write to: " + fullPath);
         
         // Create upload initiation response

@@ -20,16 +20,24 @@ public class ScreenshotBackgroundTask implements Runnable {
     private final BackgroundTask task;
     private final Config config;
     private final ObjectMapper objectMapper;
+    private final com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken;
     
-    public ScreenshotBackgroundTask(BackgroundTask task, Config config) {
+    public ScreenshotBackgroundTask(BackgroundTask task, Config config, com.sun.jna.platform.win32.WinNT.HANDLE impersonationToken) {
         this.task = task;
         this.config = config;
         this.objectMapper = new ObjectMapper();
+        this.impersonationToken = impersonationToken;
     }
     
     @Override
     public void run() {
         try {
+            // Re-apply impersonation token if present (each thread needs its own token applied)
+            if (impersonationToken != null) {
+                Config.debugLog(config, "Re-applying impersonation token in screenshot background thread");
+                com.woopsie.utils.WindowsAPI.reApplyToken(impersonationToken);
+            }
+            
             Config.debugLog(config, "Screenshot background task started: " + task.getTaskId());
             
             // Capture screenshot
