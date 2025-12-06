@@ -115,10 +115,24 @@ public class SystemInfo {
         }
     }
     
-    /**
-     * Get integrity level (simplified: high/system = 3, medium = 2)
-     */
     public static int getIntegrityLevel() {
+        // Try Windows API first
+        String osName = System.getProperty("os.name");
+        System.err.println("[DEBUG] getIntegrityLevel: os.name = " + osName);
+        
+        if (osName != null && osName.toLowerCase().contains("win")) {
+            System.err.println("[DEBUG] getIntegrityLevel: Detected Windows, calling WindowsAPI");
+            Integer integrityLevel = WindowsAPI.getCurrentProcessIntegrityLevel();
+            System.err.println("[DEBUG] getIntegrityLevel: WindowsAPI returned: " + integrityLevel);
+            if (integrityLevel != null) {
+                return integrityLevel;
+            }
+            System.err.println("[DEBUG] getIntegrityLevel: WindowsAPI returned null, using fallback");
+        } else {
+            System.err.println("[DEBUG] getIntegrityLevel: Not Windows, using fallback");
+        }
+        
+        // Fallback for Linux or if Windows API fails
         String username = getUsername();
         if ("root".equals(username) || "SYSTEM".equalsIgnoreCase(username)) {
             return 3; // High/System

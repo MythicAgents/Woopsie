@@ -53,15 +53,48 @@ public class LsTask implements Task {
     }
     
     private Map<String, Object> createFileBrowser(String pathStr, String host, Config config) throws IOException {
-        Path path = Paths.get(pathStr);
+        Path path;
+        boolean isUncPath = false;
         
-        // Resolve relative paths
-        if (!path.isAbsolute()) {
-            path = Paths.get(System.getProperty("user.dir")).resolve(path);
+        // If host is specified, construct UNC path
+        if (host != null && !host.isEmpty()) {
+            // Build UNC path: \\host\path
+            String uncPath = "\\\\" + host + "\\" + pathStr.replace("/", "\\");
+            // Remove any leading backslash from pathStr if present
+            uncPath = uncPath.replace("\\\\\\", "\\\\");
+            pathStr = uncPath;
+            isUncPath = true;
+            path = Paths.get(pathStr);
+        } else {
+            // Detect UNC paths - proper format or malformed single backslash
+            isUncPath = pathStr.startsWith("\\\\") || pathStr.startsWith("//");
+            
+            // Also check for malformed UNC paths that start with single backslash
+            // Pattern: \hostname\share or \IP\share
+            if (!isUncPath && pathStr.startsWith("\\") && pathStr.length() > 2) {
+                // Fix malformed UNC path by adding missing backslash
+                pathStr = "\\" + pathStr;
+                isUncPath = true;
+                Config.debugLog(config, "Fixed malformed UNC path: " + pathStr);
+            }
+            
+            if (isUncPath) {
+                // UNC path - ensure proper format with backslashes
+                pathStr = pathStr.replace("/", "\\");
+            }
+            
+            path = Paths.get(pathStr);
+            
+            // Resolve relative paths (but not UNC paths)
+            if (!path.isAbsolute() && !isUncPath) {
+                path = Paths.get(System.getProperty("user.dir")).resolve(path);
+            }
+            
+            // Canonicalize the path (skip for UNC paths as they may not be accessible yet)
+            if (!isUncPath) {
+                path = path.toRealPath();
+            }
         }
-        
-        // Canonicalize the path
-        path = path.toRealPath();
         
         if (!Files.exists(path)) {
             throw new IOException("Path does not exist: " + pathStr);

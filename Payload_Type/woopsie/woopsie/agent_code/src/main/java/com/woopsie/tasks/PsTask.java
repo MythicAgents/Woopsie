@@ -21,21 +21,92 @@ public class PsTask implements Task {
         Config.debugLog(config, "Executing ps command");
         
         List<Map<String, Object>> processes = new ArrayList<>();
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
         
-        // Use ProcessHandle API to enumerate processes
+        // On Windows, use native API for better process enumeration
+        if (isWindows) {
+            List<Map<String, Object>> windowsProcesses = com.woopsie.utils.WindowsAPI.enumerateProcesses();
+            
+            if (!windowsProcesses.isEmpty()) {
+                // Enhance with additional data from ProcessHandle
+                Map<Long, ProcessHandle> pidToHandle = new HashMap<>();
+                ProcessHandle.allProcesses().forEach(ph -> pidToHandle.put(ph.pid(), ph));
+                
+                for (Map<String, Object> proc : windowsProcesses) {
+                    int pid = (int) proc.get("process_id");
+                    ProcessHandle ph = pidToHandle.get((long) pid);
+                    
+                    String arch = System.getProperty("os.arch");
+                    if ("amd64".equals(arch)) {
+                        arch = "x64";
+                    }
+                    proc.put("architecture", arch);
+                    
+                    // If Windows API didn't get the name, try ProcessHandle
+                    if (!proc.containsKey("name") && ph != null) {
+                        ph.info().command().ifPresent(cmd -> {
+                            // Extract process name from path
+                            String name = cmd.substring(Math.max(cmd.lastIndexOf('/'), cmd.lastIndexOf('\\')) + 1);
+                            proc.put("name", name);
+                            proc.put("bin_path", cmd);
+                        });
+                    }
+                    
+                    // Try to get command line and other data from ProcessHandle
+                    if (ph != null) {
+                        ph.info().commandLine().ifPresent(cl -> proc.put("command_line", cl));
+                        if (!proc.containsKey("bin_path")) {
+                            ph.info().command().ifPresent(cmd -> proc.put("bin_path", cmd));
+                        }
+                        ph.info().startInstant().ifPresent(start -> 
+                            proc.put("start_time", start.getEpochSecond())
+                        );
+                    }
+                    
+                    proc.putIfAbsent("name", "");
+                    proc.putIfAbsent("user", "");
+                    proc.putIfAbsent("bin_path", "");
+                    proc.putIfAbsent("command_line", "");
+                    proc.put("integrity_level", null);
+                    proc.put("description", null);
+                    proc.put("signer", null);
+                    
+                    processes.add(proc);
+                }
+                
+                Config.debugLog(config, "Found " + processes.size() + " processes using Windows API");
+                
+                // Create output and return early
+                Map<String, Object> output = new HashMap<>();
+                output.put("platform", System.getProperty("os.name") + " " + System.getProperty("os.arch"));
+                output.put("processes", processes);
+                
+                Map<String, Object> result = new HashMap<>();
+                result.put("processes", processes);
+                result.put("user_output", objectMapper.writeValueAsString(output));
+                
+                return objectMapper.writeValueAsString(result);
+            }
+        }
+        
+        // Fallback: Use ProcessHandle API to enumerate processes
         ProcessHandle.allProcesses().forEach(ph -> {
             Map<String, Object> processEntry = new HashMap<>();
             
             long pid = ph.pid();
             processEntry.put("process_id", pid);
-            processEntry.put("architecture", System.getProperty("os.arch"));
+            
+            String arch = System.getProperty("os.arch");
+            if ("amd64".equals(arch)) {
+                arch = "x64";
+            }
+            processEntry.put("architecture", arch);
             
             // Try to read from /proc for better Linux support
             String name = null;
             String cmdLine = null;
             
             try {
-                // Read process name from /proc/[pid]/comm (works for all processes)
                 java.nio.file.Path commPath = java.nio.file.Paths.get("/proc", String.valueOf(pid), "comm");
                 if (java.nio.file.Files.exists(commPath)) {
                     name = java.nio.file.Files.readString(commPath).trim();
@@ -81,7 +152,24 @@ public class PsTask implements Task {
                 ph.info().commandLine().ifPresent(cl -> processEntry.put("command_line", cl));
             }
             
-            ph.info().user().ifPresent(user -> processEntry.put("user", user));
+            // Try to get user with Windows API first (more reliable)
+            String user = null;
+            if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                try {
+                    user = com.woopsie.utils.WindowsAPI.getProcessOwner((int) pid);
+                } catch (Exception e) {
+                    // Fall back to ProcessHandle
+                }
+            }
+            
+            // Fall back to ProcessHandle API if Windows API failed or not on Windows
+            if (user == null) {
+                user = ph.info().user().orElse(null);
+            }
+            
+            if (user != null) {
+                processEntry.put("user", user);
+            }
             
             ph.parent().ifPresent(parent -> processEntry.put("parent_process_id", parent.pid()));
             
@@ -89,12 +177,11 @@ public class PsTask implements Task {
                 processEntry.put("start_time", start.getEpochSecond())
             );
             
-            // Add defaults for fields we can't easily get in Java
-            processEntry.putIfAbsent("name", "unknown");
-            processEntry.putIfAbsent("user", "unknown");
-            processEntry.putIfAbsent("bin_path", null);
+            processEntry.putIfAbsent("name", "");
+            processEntry.putIfAbsent("user", "");
+            processEntry.putIfAbsent("bin_path", "");
             processEntry.putIfAbsent("parent_process_id", null);
-            processEntry.putIfAbsent("command_line", null);
+            processEntry.putIfAbsent("command_line", "");
             processEntry.put("integrity_level", null);
             processEntry.put("description", null);
             processEntry.put("signer", null);
@@ -104,7 +191,6 @@ public class PsTask implements Task {
         
         Config.debugLog(config, "Found " + processes.size() + " processes");
         
-        // Create output structure matching oopsie
         Map<String, Object> output = new HashMap<>();
         output.put("platform", System.getProperty("os.name") + " " + System.getProperty("os.arch"));
         output.put("processes", processes);

