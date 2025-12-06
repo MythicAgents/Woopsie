@@ -68,6 +68,62 @@ sudo ./mythic-cli install github https://github.com/haha150/woopsie
 
 3. Download and deploy payload
 
+## Commands
+
+Woopsie supports the following built-in commands:
+
+| Command | Description | Platforms |
+|---------|-------------|-----------|
+| `pwd` | Print working directory | All |
+| `ls <path>` | List directory contents | All |
+| `cat <file>` | Display file contents | All |
+| `rm <path>` | Remove file or directory | All |
+| `upload` | Upload file to target | All |
+| `download <path>` | Download file from target | All |
+| `run <command>` | Execute shell command | All |
+| `ps` | List running processes | All |
+| `whoami` | Display current user info | All |
+| `sleep <interval> <jitter>` | Configure agent sleep/jitter | All |
+| `socks` | Start SOCKS proxy | All |
+| `pty` | Interactive pseudo-terminal | All |
+| `steal_token <pid>` | Steal token from process | Windows |
+| `rev2self` | Revert to original token | Windows |
+| `exit` | Terminate agent | All |
+
+### Token Manipulation (Windows)
+
+The `steal_token` and `rev2self` commands enable privilege escalation through token impersonation:
+
+**steal_token**: Duplicates the access token from a target process and impersonates that security context. Useful for:
+- Escalating privileges from a non-admin to admin context
+- Lateral movement by impersonating different user accounts
+- Accessing resources with different security contexts
+
+Example:
+```bash
+# Find a high-privilege process
+ps
+# Steal token from winlogon.exe (PID 456)
+steal_token 456
+# Verify new context
+whoami
+```
+
+**rev2self**: Reverts the agent back to its original security token after impersonation.
+
+Example:
+```bash
+rev2self
+whoami
+```
+
+**Requirements:**
+- Windows operating system
+- Appropriate permissions to open target process
+- Target process must have accessible token
+
+**MITRE ATT&CK:** T1134, T1134.001
+
 ## Architecture
 
 ```

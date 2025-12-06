@@ -1,0 +1,28 @@
+[
+  {
+    "name": "com.sun.jna.Native",
+    "methods": [
+      {"name": "malloc", "parameterTypes": ["long"]},
+      {"name": "free", "parameterTypes": ["long"]},
+      {"name": "getByteBuffer", "parameterTypes": ["long", "long"]},
+      {"name": "setMemory", "parameterTypes": ["long", "long", "byte"]},
+      {"name": "getByte", "parameterTypes": ["long"]},
+      {"name": "getShort", "parameterTypes": ["long"]},
+      {"name": "getInt", "parameterTypes": ["long"]},
+      {"name": "getLong", "parameterTypes": ["long"]},
+      {"name": "getFloat", "parameterTypes": ["long"]},
+      {"name": "getDouble", "parameterTypes": ["long"]},
+      {"name": "getPointer", "parameterTypes": ["long"]},
+      {"name": "getString", "parameterTypes": ["long", "java.lang.String"]},
+      {"name": "setPointer", "parameterTypes": ["long", "long"]},
+      {"name": "setByte", "parameterTypes": ["long", "byte"]},
+      {"name": "setShort", "parameterTypes": ["long", "short"]},
+      {"name": "setInt", "parameterTypes": ["long", "int"]},
+      {"name": "setLong", "parameterTypes": ["long", "long"]},
+      {"name": "setFloat", "parameterTypes": ["long", "float"]},
+      {"name": "setDouble", "parameterTypes": ["long", "double"]},
+      {"name": "getWideString", "parameterTypes": ["long"]},
+      {"name": "setWideString", "parameterTypes": ["long", "java.lang.String"]}
+    ]
+  }
+]

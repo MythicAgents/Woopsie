@@ -316,6 +316,21 @@ public class CommunicationHandler {
                     result.put("user_output", jsonOutput.get("user_output").asText());
                 }
                 return result;
+            } else if (jsonOutput.has("callback")) {
+                // Commands with callback field (cd, token manipulation) - extract callback contents to top level
+                JsonNode callback = jsonOutput.get("callback");
+                if (callback != null && callback.isObject()) {
+                    // Extract all fields from callback to top level
+                    callback.fields().forEachRemaining(entry -> {
+                        result.put(entry.getKey(), objectMapper.convertValue(entry.getValue(), Object.class));
+                    });
+                    // Also preserve the callback field itself
+                    result.put("callback", objectMapper.convertValue(callback, Object.class));
+                }
+                if (jsonOutput.has("user_output")) {
+                    result.put("user_output", jsonOutput.get("user_output").asText());
+                }
+                return result;
             }
         }
         

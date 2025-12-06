@@ -9,8 +9,8 @@ import java.util.Map;
 
 /**
  * SOCKS5 proxy implementation for Mythic C2
- * The actual SOCKS proxying is handled by SocksBackgroundTask
- * This task just initiates the background handler
+ * This task should never be executed - SOCKS is handled entirely by SocksBackgroundTask
+ * The Agent detects "socks" command and starts the background task directly
  */
 public class SocksTask implements Task {
     
@@ -21,20 +21,10 @@ public class SocksTask implements Task {
     
     @Override
     public String execute(Config config, JsonNode parameters) throws Exception {
-        int port = parameters.get("port").asInt();
-        String action = parameters.get("action").asText();
+        Config.debugLog(config, "SocksTask.execute() called - this should not happen!");
         
-        Config.debugLog(config, "[socks] Action: " + action + ", Port: " + port);
-        
-        if ("start".equals(action)) {
-            // Return empty response - background task will send the actual "listening" response
-            // This prevents double user_output issue
-            return "";
-        } else if ("stop".equals(action)) {
-            // Jobkill will handle stopping the background task
-            return "{\"user_output\": \"SOCKS proxy stopped\", \"completed\": true}";
-        } else {
-            return "{\"user_output\": \"Unknown action: " + action + "\", \"completed\": true}";
-        }
+        // This should never actually be called - socks is handled as a background task
+        // The Agent detects socks commands and starts the background task directly
+        throw new Exception("SOCKS must be run as background task");
     }
 }

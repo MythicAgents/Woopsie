@@ -1,0 +1,42 @@
+[
+  {
+    "interfaces": [
+      "com.woopsie.utils.WindowsAPI$Advapi32Ext"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.woopsie.utils.WindowsAPI$Kernel32Ext"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.sun.jna.Library"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.sun.jna.win32.StdCallLibrary"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.woopsie.utils.WindowsScreenshot$User32Ext"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.woopsie.utils.WindowsScreenshot$Gdi32Ext"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.sun.jna.platform.win32.User32"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.sun.jna.platform.win32.GDI32"
+    ]
+  }
+]

