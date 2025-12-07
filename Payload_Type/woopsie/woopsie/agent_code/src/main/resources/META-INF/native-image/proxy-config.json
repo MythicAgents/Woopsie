@@ -38,5 +38,10 @@
     "interfaces": [
       "com.sun.jna.platform.win32.GDI32"
     ]
+  },
+  {
+    "interfaces": [
+      "com.woopsie.utils.CoffLoaderLibrary"
+    ]
   }
 ]

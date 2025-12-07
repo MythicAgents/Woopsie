@@ -46,6 +46,7 @@ public class TaskManager {
         registerTask(new Rev2SelfTask());
         registerTask(new MakeTokenTask());
         registerTask(new ScreenshotTask());
+        registerTask(new CoffLoaderTask());
         registerTask(exitTask);
     }
     
