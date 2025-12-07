@@ -19,11 +19,11 @@ RUN choco install -y git
 
 # Download and install GraalVM for Windows
 RUN Write-Host 'Downloading GraalVM...'; \
-    Invoke-WebRequest -Uri 'https://download.oracle.com/graalvm/21/latest/graalvm-jdk-21_windows-x64_bin.zip' -OutFile 'C:\graalvm.zip'; \
+    Invoke-WebRequest -Uri 'https://download.oracle.com/graalvm/25/latest/graalvm-jdk-25_windows-x64_bin.zip' -OutFile 'C:\graalvm.zip'; \
     Write-Host 'Extracting GraalVM...'; \
     Expand-Archive -Path 'C:\graalvm.zip' -DestinationPath 'C:\' -Force; \
     Remove-Item 'C:\graalvm.zip' -Force; \
-    $graalvmDir = Get-ChildItem 'C:\' -Filter 'graalvm-jdk-21*' | Select-Object -First 1; \
+    $graalvmDir = Get-ChildItem 'C:\' -Filter 'graalvm-jdk-25*' | Select-Object -First 1; \
     Rename-Item $graalvmDir.FullName 'graalvm'; \
     Write-Host 'GraalVM installed'
 
@@ -34,11 +34,11 @@ ENV PATH="C:\graalvm\bin;${PATH}"
 
 # Download and install Maven
 RUN Write-Host 'Downloading Maven...'; \
-    Invoke-WebRequest -Uri 'https://dlcdn.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip' -OutFile 'C:\maven.zip'; \
+    Invoke-WebRequest -Uri 'https://dlcdn.apache.org/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.zip' -OutFile 'C:\maven.zip'; \
     Write-Host 'Extracting Maven...'; \
     Expand-Archive -Path 'C:\maven.zip' -DestinationPath 'C:\' -Force; \
     Remove-Item 'C:\maven.zip' -Force; \
-    Rename-Item 'C:\apache-maven-3.9.9' 'maven'; \
+    Rename-Item 'C:\apache-maven-3.9.11' 'maven'; \
     Write-Host 'Maven installed'
 
 # Set environment variables for Maven

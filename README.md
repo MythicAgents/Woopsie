@@ -168,7 +168,7 @@ Mythic payload builder that generates `PayloadVars.java` with C2 configuration a
 ### Build Tools
 - Java 17 (development)
 - Maven 3.8+
-- GraalVM 21 (for native builds)
+- GraalVM 25 (for native builds)
 - Docker (for Mythic integration)
 
 ## Configuration
@@ -245,9 +245,9 @@ java -agentlib:native-image-agent=config-output-dir=src/main/resources/META-INF/
 
 ### Requirements
 - Java 17 or later
-- Apache Maven 3.8+
+- Apache Maven 3.9.11
 - Mythic framework 3.4.6+
-- GraalVM 21+ (for native builds)
+- GraalVM 25 (for native builds)
 - Python 3.11+ with asyncssh, aiofiles (for Mythic integration)
 
 ### Building/Testing Locally
@@ -291,9 +291,9 @@ PROFILE=httpx RAW_C2_CONFIG='{"post": {...}}' mvn clean package
 
 Requirements:
 - Java 17 or later
-- Apache Maven 3.8+
+- Apache Maven 3.9.11
 - Mythic framework 3.4.6+
-- GraalVM 21+ (for native builds)
+- GraalVM 25 (for native builds)
 
 ## License
 

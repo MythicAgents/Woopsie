@@ -157,7 +157,8 @@
                         <!-- JNA Support -->
                         <buildArg>-H:+JNI</buildArg>
                         <buildArg>-H:+AddAllCharsets</buildArg>
-                        <buildArg>--enable-url-protocols=http,https</buildArg>
+                        <!-- WebSocket Support -->
+                        <buildArg>--enable-url-protocols=http,https,ws,wss</buildArg>
                     </buildArgs>
                 </configuration>
             </plugin>
