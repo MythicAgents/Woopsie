@@ -74,21 +74,27 @@ Woopsie supports the following built-in commands:
 
 | Command | Description | Platforms |
 |---------|-------------|-----------|
-| `pwd` | Print working directory | All |
-| `ls <path>` | List directory contents | All |
 | `cat <file>` | Display file contents | All |
-| `rm <path>` | Remove file or directory | All |
-| `upload` | Upload file to target | All |
+| `cd <path>` | Change working directory | All |
+| `coff_loader` | Execute Beacon Object Files (BOF) | Windows |
+| `cp <source> <dest>` | Copy file or directory | All |
 | `download <path>` | Download file from target | All |
-| `run <command>` | Execute shell command | All |
+| `exit` | Terminate agent | All |
+| `ls [path]` | List directory contents | All |
+| `make_token <domain\user> <password>` | Create token with credentials | Windows |
+| `mkdir <path>` | Create directory | All |
 | `ps` | List running processes | All |
-| `whoami` | Display current user info | All |
+| `pty` | Interactive pseudo-terminal | All |
+| `pwd` | Print working directory | All |
+| `rev2self` | Revert to original token | Windows |
+| `rm <path>` | Remove file or directory | All |
+| `run <command>` | Execute shell command | All |
+| `screenshot` | Capture screenshot | All |
 | `sleep <interval> <jitter>` | Configure agent sleep/jitter | All |
 | `socks` | Start SOCKS proxy | All |
-| `pty` | Interactive pseudo-terminal | All |
 | `steal_token <pid>` | Steal token from process | Windows |
-| `rev2self` | Revert to original token | Windows |
-| `exit` | Terminate agent | All |
+| `upload` | Upload file to target | All |
+| `whoami` | Display current user info | All |
 
 ### Token Manipulation (Windows)
 
@@ -138,6 +144,8 @@ Payload_Type/woopsie/
 │   ├── src/main/resources/
 │   │   ├── logback.xml         # Logging configuration
 │   │   └── META-INF/native-image/  # GraalVM config
+│   │       ├── reflect-config.json # Reflection metadata
+│   │       └── proxy-config.json   # Dynamic proxy config
 │   └── pom.xml                 # Maven build configuration
 ├── woopsie/mythic/
 │   └── agent_functions/
@@ -172,7 +180,8 @@ Mythic payload builder that:
 ### Runtime
 - Jackson 2.20.1: JSON processing
 - Apache HttpClient 5.4.1: HTTP/HTTPS communication
-- SLF4J 2.0.16 (with NOP backend): Minimal logging
+- Logback 1.5.16 + SLF4J 2.0.16: Logging
+- JNA 5.15.0: Native library access (for BOF execution)
 ### builder.py
 Mythic payload builder that generates `PayloadVars.java` with C2 configuration and builds JAR or native executable.
 
