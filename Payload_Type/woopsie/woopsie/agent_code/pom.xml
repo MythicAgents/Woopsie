@@ -60,6 +60,13 @@
             <artifactId>jna-platform</artifactId>
             <version>5.15.0</version>
         </dependency>
+        
+        <!-- WebSocket Client -->
+        <dependency>
+            <groupId>org.java-websocket</groupId>
+            <artifactId>Java-WebSocket</artifactId>
+            <version>1.6.0</version>
+        </dependency>
     </dependencies>
 
     <build>

@@ -173,6 +173,11 @@ Task execution framework with built-in commands:
   - Domain rotation (round-robin, random, fail-over)
   - Multiple URIs for endpoint randomization
   - Smart JavaScript obfuscation handling
+- **WebSocketProfile.java**: Persistent WebSocket communication:
+  - Bi-directional persistent connection (ws:// or wss://)
+  - JSON message format: `{"data":"<base64>"}`
+  - Automatic reconnection on connection loss
+  - Ping/pong handling for connection keepalive
 
 ### builder.py
 Mythic payload builder that:
@@ -180,6 +185,7 @@ Mythic payload builder that:
 ### Runtime
 - Jackson 2.20.1: JSON processing
 - Apache HttpClient 5.4.1: HTTP/HTTPS communication
+- Java-WebSocket 1.5.7: WebSocket client
 - Logback 1.5.16 + SLF4J 2.0.16: Logging
 - JNA 5.15.0: Native library access (for BOF execution)
 ### builder.py
@@ -221,6 +227,12 @@ Mythic payload builder that generates `PayloadVars.java` with C2 configuration a
 - `CALLBACK_DOMAINS`: List of C2 domains (JSON array)
 - `DOMAIN_ROTATION`: Strategy (round-robin, random, fail-over)
 - `FAILOVER_THRESHOLD`: Retry attempts before switching domains
+
+**WebSocket Profile:**
+- `CALLBACK_HOST`: WebSocket server URL (supports ws:// and wss://)
+- `CALLBACK_PORT`: WebSocket server port
+- `POST_URI`: WebSocket endpoint path
+- `HEADERS`: HTTP headers for WebSocket handshake (JSON)
 ### Windows Native Builds
 Native Windows builds are supported via SSH remote build to a Windows VM with Maven and GraalVM installed. Configure in Mythic:
 - `windows_build_host`: Windows VM IP/hostname

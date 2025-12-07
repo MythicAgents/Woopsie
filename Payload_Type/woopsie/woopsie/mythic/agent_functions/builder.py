@@ -85,7 +85,7 @@ class Woopsie(PayloadType):
         ),
     ]
     
-    c2_profiles = ["http", "httpx"]
+    c2_profiles = ["http", "httpx", "websocket"]
 
     c2_parameter_deviations = {
         "http": {

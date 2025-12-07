@@ -23,6 +23,8 @@ public class ProfileFactory {
                 return new HttpProfile(config);
             case "httpx":
                 return new HttpxProfile(config);
+            case "websocket":
+                return new WebSocketProfile(config);
             default:
                 throw new Exception("Unsupported profile type: " + profileType);
         }

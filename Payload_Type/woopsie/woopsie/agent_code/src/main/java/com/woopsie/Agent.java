@@ -31,9 +31,15 @@ public class Agent {
     }
     
     public void start() {
+        // Check killdate before starting
+        if (!checkKilldate()) {
+            Config.debugLog(config, "Killdate reached, exiting...");
+            return;
+        }
+        
         // Perform initial checkin
         try {
-            Config.debugLog(config, "Starting checkin to: " + config.getCallbackUrl());
+            Config.debugLog(config, "Starting checkin (profile: " + config.getProfile() + ")");
             commHandler.checkin();
             Config.debugLog(config, "Checkin successful");
         } catch (Exception e) {
@@ -138,6 +144,12 @@ public class Agent {
                 // Check if exit was requested
                 if (taskManager.shouldExit()) {
                     Config.debugLog(config, "Exit requested, stopping agent...");
+                    break;
+                }
+                
+                // Check killdate on each loop iteration
+                if (!checkKilldate()) {
+                    Config.debugLog(config, "Killdate reached, exiting...");
                     break;
                 }
                 
@@ -650,6 +662,33 @@ public class Agent {
      */
     public static WinNT.HANDLE getImpersonationToken() {
         return currentImpersonationToken;
+    }
+    
+    /**
+     * Check if the killdate has been reached
+     * @return false if killdate has been reached, true otherwise
+     */
+    private boolean checkKilldate() {
+        String killdate = config.getKilldate();
+        if (killdate == null || killdate.isEmpty()) {
+            return true; // No killdate set
+        }
+        
+        try {
+            // Parse killdate in format YYYY-MM-DD
+            java.time.LocalDate killdateDate = java.time.LocalDate.parse(killdate);
+            java.time.LocalDate today = java.time.LocalDate.now();
+            
+            if (today.isAfter(killdateDate) || today.isEqual(killdateDate)) {
+                Config.debugLog(config, "Killdate reached: " + killdate + " (today: " + today + ")");
+                return false;
+            }
+        } catch (Exception e) {
+            Config.debugLog(config, "Failed to parse killdate: " + killdate + " - " + e.getMessage());
+            // If we can't parse the killdate, continue running
+        }
+        
+        return true;
     }
     
     public static void main(String[] args) throws Exception {
