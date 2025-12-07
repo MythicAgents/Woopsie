@@ -15,6 +15,7 @@ Woopsie is a cross-platform C2 agent for the Mythic framework, written in Java. 
 - **Multiple C2 Profiles**:
   - HTTP
   - HTTPX
+  - WebSocket
 - **Mythic Integration**: Full integration with Mythic C2 framework
 - **Task Execution**: Extensible task framework with built-in commands
 
@@ -96,40 +97,6 @@ Woopsie supports the following built-in commands:
 | `upload` | Upload file to target | All |
 | `whoami` | Display current user info | All |
 
-### Token Manipulation (Windows)
-
-The `steal_token` and `rev2self` commands enable privilege escalation through token impersonation:
-
-**steal_token**: Duplicates the access token from a target process and impersonates that security context. Useful for:
-- Escalating privileges from a non-admin to admin context
-- Lateral movement by impersonating different user accounts
-- Accessing resources with different security contexts
-
-Example:
-```bash
-# Find a high-privilege process
-ps
-# Steal token from winlogon.exe (PID 456)
-steal_token 456
-# Verify new context
-whoami
-```
-
-**rev2self**: Reverts the agent back to its original security token after impersonation.
-
-Example:
-```bash
-rev2self
-whoami
-```
-
-**Requirements:**
-- Windows operating system
-- Appropriate permissions to open target process
-- Target process must have accessible token
-
-**MITRE ATT&CK:** T1134, T1134.001
-
 ## Architecture
 
 ```
@@ -185,7 +152,7 @@ Mythic payload builder that:
 ### Runtime
 - Jackson 2.20.1: JSON processing
 - Apache HttpClient 5.4.1: HTTP/HTTPS communication
-- Java-WebSocket 1.5.7: WebSocket client
+- Java-WebSocket 1.6.0: WebSocket client
 - Logback 1.5.16 + SLF4J 2.0.16: Logging
 - JNA 5.15.0: Native library access (for BOF execution)
 ### builder.py
@@ -233,6 +200,7 @@ Mythic payload builder that generates `PayloadVars.java` with C2 configuration a
 - `CALLBACK_PORT`: WebSocket server port
 - `POST_URI`: WebSocket endpoint path
 - `HEADERS`: HTTP headers for WebSocket handshake (JSON)
+
 ### Windows Native Builds
 Native Windows builds are supported via SSH remote build to a Windows VM with Maven and GraalVM installed. Configure in Mythic:
 - `windows_build_host`: Windows VM IP/hostname
