@@ -33,6 +33,53 @@ Woopsie is a cross-platform C2 agent for the Mythic framework, written in Java. 
 - Benefits: No JVM required, smaller runtime footprint, better OPSEC
 - Drawbacks: Longer build times (~2-5 minutes), Windows requires remote build VM
 
+### Native Build, remote Windows build, pre-requisites
+Install OpenSSH Server on Windows (for remote builds):
+```
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType 'Automatic'
+if (!(Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+}
+```
+
+Install GraalVM:
+```
+# Download GraalVM 25 from: https://www.graalvm.org/downloads/
+# Select: Java 25, Windows, x64
+
+# After downloading, extract to C:\Program Files\
+# Then set environment variables:
+
+setx /M JAVA_HOME "C:\Progra~1\graalvm-jdk-25.0.1+8.1"
+
+# Add to PATH:
+C:\Program Files\graalvm-jdk-25.0.1+8.1\bin
+```
+
+Install Maven:
+```
+# Download latest Maven from: https://maven.apache.org/download.cgi
+# Example: apache-maven-3.9.11-bin.zip
+
+# Extract to C:\Program Files\
+# Then configure environment variables:
+
+setx /M M2_HOME "C:\Progra~1\apache-maven-3.9.11"
+
+# Add to PATH:
+C:\Program Files\apache-maven-3.9.11\bin
+```
+
+Install Visual Studio Build Tools (required for Native Image):
+```
+# Download Visual Studio Build Tools 2022 from visualstudio.microsoft.com
+# Select Desktop development with C++
+# Ensure Windows 11 SDK and MSVC C++ x64/x86 build tools are selected
+# Click Install
+```
+
 ## Quick Start
 
 ### Building Locally
