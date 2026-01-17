@@ -519,6 +519,7 @@ public class CommunicationHandler {
     
     /**
      * Send data with encryption if AES key is available - uses configured profile
+     * Includes retry logic for socket errors (e.g., proxy connection issues)
      */
     private String sendData(String jsonData) throws Exception {
         String encodedPayload;
@@ -536,19 +537,47 @@ public class CommunicationHandler {
             encodedPayload = Base64.getEncoder().encodeToString(payload.getBytes());
         }
         
-        // Send via profile (handles HTTP/HTTPX specifics)
-        String responseBody = profile.send(encodedPayload);
-        byte[] decoded = Base64.getDecoder().decode(responseBody);
+        // Manual retry for socket errors (HttpClient's retry doesn't always catch proxy issues)
+        int maxRetries = 3;
+        Exception lastException = null;
         
-        if (aesKey != null) {
-            // Decrypt response
-            Config.debugLog(config, "Decrypting response with AES-256");
-            byte[] decrypted = EncryptionUtils.decryptPayload(decoded, aesKey);
-            return new String(decrypted);
-        } else {
-            // No encryption: skip UUID prefix
-            return new String(decoded, 36, decoded.length - 36);
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // Send via profile (handles HTTP/HTTPX specifics)
+                String responseBody = profile.send(encodedPayload);
+                byte[] decoded = Base64.getDecoder().decode(responseBody);
+                
+                if (aesKey != null) {
+                    // Decrypt response
+                    Config.debugLog(config, "Decrypting response with AES-256");
+                    byte[] decrypted = EncryptionUtils.decryptPayload(decoded, aesKey);
+                    return new String(decrypted);
+                } else {
+                    // No encryption: skip UUID prefix
+                    return new String(decoded, 36, decoded.length - 36);
+                }
+            } catch (java.io.IOException e) {
+                lastException = e;
+                if (attempt < maxRetries) {
+                    Config.debugLog(config, "Network error (attempt " + attempt + "/" + maxRetries + "): " + e.getMessage() + " - retrying...");
+                    // Brief pause before retry
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new Exception("Interrupted during retry", ie);
+                    }
+                } else {
+                    Config.debugLog(config, "Network error (attempt " + attempt + "/" + maxRetries + "): " + e.getMessage() + " - giving up");
+                }
+            } catch (Exception e) {
+                // For non-network exceptions, fail immediately
+                throw e;
+            }
         }
+        
+        // All retries failed
+        throw lastException != null ? lastException : new Exception("sendData failed after " + maxRetries + " attempts");
     }
     
     /**
