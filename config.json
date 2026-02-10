@@ -6,6 +6,6 @@
   "exclude_documentation_wrapper": true,
   "exclude_agent_icons": false,
   "remote_images": {
-    "woopsie": "ghcr.io/mythicagents/woopsie:v0.0.4"
+    "woopsie": "ghcr.io/mythicagents/woopsie:v0.0.5"
   }
 }
