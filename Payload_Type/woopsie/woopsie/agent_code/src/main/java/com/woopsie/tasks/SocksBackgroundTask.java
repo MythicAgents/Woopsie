@@ -103,9 +103,6 @@ public class SocksBackgroundTask implements Runnable {
                         handleMythicMessage(message);
                     }
                     
-                    // Small sleep to avoid busy loop
-                    Thread.sleep(SLEEP_INTERVAL_MS);
-                    
                 } catch (InterruptedException e) {
                     Config.debugLog(config, "[socks] Interrupted, exiting");
                     break;
