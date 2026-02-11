@@ -132,10 +132,10 @@ class SocksCommand(CommandBase):
                     Response=resp.Error.encode()
                 ))
             else:
-                response.Completed = True
+                # Don't mark as completed yet - let the agent report when it actually stops
                 await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
                     TaskID=taskData.Task.ID,
-                    Response=f"Stopped SOCKS5 server on port {taskData.args.get_arg('port')}\nUpdating Sleep to 1".encode()
+                    Response=f"Stopped SOCKS5 server on port {taskData.args.get_arg('port')}\nUpdating Sleep to 3\n".encode()
                 ))
                 await SendMythicRPCTaskCreateSubtask(MythicRPCTaskCreateSubtaskMessage(
                     TaskID=taskData.Task.ID,

