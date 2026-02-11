@@ -506,10 +506,13 @@ public class SocksBackgroundTask implements Runnable {
         void close() {
             running = false;
             if (targetSocket != null && !targetSocket.isClosed()) {
-                // Shutdown output (write side) to send FIN, but keep input (read side) open
-                // This allows read thread to receive the remote's FIN for proper TCP close handshake
-                // DO NOT call targetSocket.close() here - let the read thread close it after receiving remote's FIN
-                try { targetSocket.shutdownOutput(); } catch (Exception ignored) {}
+                // Set SO_LINGER=0 to force RST on close (no TIME-WAIT)
+                // This matches Poseidon's behavior: hard close sends RST instead of FIN,
+                // going directly to CLOSED state without TIME-WAIT or FIN-WAIT
+                try {
+                    targetSocket.setSoLinger(true, 0);
+                    targetSocket.close();
+                } catch (Exception ignored) {}
             }
             // Interrupt both threads to unblock any waiting operations (e.g. BlockingQueue.take())
             if (forwardThread != null) {
