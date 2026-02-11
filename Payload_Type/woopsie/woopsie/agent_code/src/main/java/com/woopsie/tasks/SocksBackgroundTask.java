@@ -389,6 +389,7 @@ public class SocksBackgroundTask implements Runnable {
         writeThread.setName("SOCKS-Write-" + conn.serverId);
         
         conn.forwardThread = readThread;
+        conn.writeThread = writeThread;
         
         // Start write thread first (it blocks waiting for data from Mythic)
         writeThread.start();
@@ -488,6 +489,7 @@ public class SocksBackgroundTask implements Runnable {
         ConnectionState state;
         Socket targetSocket;
         Thread forwardThread;
+        Thread writeThread;
         BlockingQueue<byte[]> outgoingData;
         volatile boolean running;
         
@@ -507,13 +509,17 @@ public class SocksBackgroundTask implements Runnable {
         void close() {
             running = false;
             if (targetSocket != null && !targetSocket.isClosed()) {
-                try {
-                    targetSocket.close();
-                } catch (Exception ignored) {
-                }
+                // Properly shutdown TCP to send FIN and unblock pending I/O on both threads
+                try { targetSocket.shutdownInput(); } catch (Exception ignored) {}
+                try { targetSocket.shutdownOutput(); } catch (Exception ignored) {}
+                try { targetSocket.close(); } catch (Exception ignored) {}
             }
+            // Interrupt both threads to unblock any waiting operations (e.g. BlockingQueue.take())
             if (forwardThread != null) {
                 forwardThread.interrupt();
+            }
+            if (writeThread != null) {
+                writeThread.interrupt();
             }
         }
     }
