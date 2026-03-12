@@ -84,25 +84,7 @@ public class HttpxProfile implements C2Profile {
                 org.apache.hc.core5.util.TimeValue.ofMilliseconds(100) // 100ms delay between retries
             ));
             
-            // Configure proxy if set
-            if (config.hasProxy()) {
-                HttpHost proxy = new HttpHost(config.getProxyHost(), config.getProxyPort());
-                DefaultProxyRoutePlanner routePlanner = new DefaultProxyRoutePlanner(proxy);
-                builder.setRoutePlanner(routePlanner);
-                
-                Config.debugLog(config, "Configuring HTTPX proxy: " + config.getProxyHost() + ":" + config.getProxyPort());
-                
-                // Add proxy authentication if credentials provided
-                if (config.getProxyUser() != null && !config.getProxyUser().isEmpty()) {
-                    BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-                    credsProvider.setCredentials(
-                        new AuthScope(proxy),
-                        new UsernamePasswordCredentials(config.getProxyUser(), config.getProxyPass().toCharArray())
-                    );
-                    builder.setDefaultCredentialsProvider(credsProvider);
-                    Config.debugLog(config, "Proxy authentication configured for user: " + config.getProxyUser());
-                }
-            }
+            // httpx C2 profile does not support proxy parameters
             
             return builder.build();
         } catch (Exception e) {

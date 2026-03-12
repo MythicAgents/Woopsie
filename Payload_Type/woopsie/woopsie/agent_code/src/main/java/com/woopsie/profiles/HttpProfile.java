@@ -60,11 +60,25 @@ public class HttpProfile implements C2Profile {
             
             // Configure proxy if set
             if (config.hasProxy()) {
-                HttpHost proxy = new HttpHost(config.getProxyHost(), config.getProxyPort());
+                // Use the scheme Mythic provides; default to http if none
+                String rawHost = config.getProxyHost();
+                String scheme;
+                String hostOnly;
+                if (rawHost.startsWith("https://")) {
+                    scheme = "https";
+                    hostOnly = rawHost.substring(8);
+                } else if (rawHost.startsWith("http://")) {
+                    scheme = "http";
+                    hostOnly = rawHost.substring(7);
+                } else {
+                    scheme = "http";
+                    hostOnly = rawHost;
+                }
+                HttpHost proxy = new HttpHost(scheme, hostOnly, config.getProxyPort());
                 DefaultProxyRoutePlanner routePlanner = new DefaultProxyRoutePlanner(proxy);
                 builder.setRoutePlanner(routePlanner);
                 
-                Config.debugLog(config, "Configuring HTTP proxy: " + config.getProxyHost() + ":" + config.getProxyPort());
+                Config.debugLog(config, "Configuring HTTP proxy: " + scheme + "://" + hostOnly + ":" + config.getProxyPort());
                 
                 // Add proxy authentication if credentials provided
                 if (config.getProxyUser() != null && !config.getProxyUser().isEmpty()) {
