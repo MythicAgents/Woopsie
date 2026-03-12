@@ -17,6 +17,7 @@ class Woopsie(PayloadType):
     name = "woopsie"
     file_extension = "jar"
     author = "@haha150"
+    semver = "0.0.8"
     supported_os = [
         SupportedOS.Windows,
         SupportedOS.Linux,
