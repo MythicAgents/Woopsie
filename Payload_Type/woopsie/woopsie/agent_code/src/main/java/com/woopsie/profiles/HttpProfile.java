@@ -7,8 +7,10 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.routing.DefaultProxyRoutePlanner;
+import org.apache.hc.client5.http.impl.routing.SystemDefaultRoutePlanner;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.io.entity.StringEntity;
+import java.net.ProxySelector;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.client5.http.auth.AuthScope;
 import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
@@ -90,6 +92,10 @@ public class HttpProfile implements C2Profile {
                     builder.setDefaultCredentialsProvider(credsProvider);
                     Config.debugLog(config, "Proxy authentication configured for user: " + config.getProxyUser());
                 }
+            } else {
+                // No Mythic proxy configured - respect system proxy settings
+                builder.setRoutePlanner(new SystemDefaultRoutePlanner(ProxySelector.getDefault()));
+                Config.debugLog(config, "No Mythic proxy set, using system proxy settings");
             }
             
             return builder.build();
