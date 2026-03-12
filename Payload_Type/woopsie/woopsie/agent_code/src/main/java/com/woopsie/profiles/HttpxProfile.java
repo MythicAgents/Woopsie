@@ -8,16 +8,9 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
-import org.apache.hc.client5.http.impl.routing.DefaultProxyRoutePlanner;
-import org.apache.hc.client5.http.impl.routing.SystemDefaultRoutePlanner;
-import org.apache.hc.core5.http.HttpHost;
-import java.net.ProxySelector;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.client5.http.auth.AuthScope;
-import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
-import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
 import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
 import org.apache.hc.client5.http.ssl.TrustAllStrategy;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
@@ -80,16 +73,11 @@ public class HttpxProfile implements C2Profile {
                     .build()
             );
             
-            // Enable automatic retry on connection failures (especially for proxy issues)
+            // Enable automatic retry on connection failures
             builder.setRetryStrategy(new org.apache.hc.client5.http.impl.DefaultHttpRequestRetryStrategy(
                 3, // max 3 retries
                 org.apache.hc.core5.util.TimeValue.ofMilliseconds(100) // 100ms delay between retries
             ));
-            
-            // httpx C2 profile does not support proxy parameters
-            // Respect system proxy settings if available
-            builder.setRoutePlanner(new SystemDefaultRoutePlanner(ProxySelector.getDefault()));
-            Config.debugLog(config, "HTTPX using system proxy settings");
             
             return builder.build();
         } catch (Exception e) {
