@@ -1,3 +1,5 @@
+[![Build and push container images](https://github.com/MythicAgents/Woopsie/actions/workflows/docker.yml/badge.svg)](https://github.com/MythicAgents/Woopsie/actions/workflows/docker.yml)
+
 <p align="center">
   <img alt="Woopsie Logo" src="agent_icons/woopsie.svg" height="25%" width="25%">
 </p>
