@@ -7,8 +7,10 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.routing.DefaultProxyRoutePlanner;
+import org.apache.hc.client5.http.impl.routing.SystemDefaultRoutePlanner;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.io.entity.StringEntity;
+import java.net.ProxySelector;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.client5.http.auth.AuthScope;
 import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
@@ -60,11 +62,25 @@ public class HttpProfile implements C2Profile {
             
             // Configure proxy if set
             if (config.hasProxy()) {
-                HttpHost proxy = new HttpHost(config.getProxyHost(), config.getProxyPort());
+                // Use the scheme Mythic provides; default to http if none
+                String rawHost = config.getProxyHost();
+                String scheme;
+                String hostOnly;
+                if (rawHost.startsWith("https://")) {
+                    scheme = "https";
+                    hostOnly = rawHost.substring(8);
+                } else if (rawHost.startsWith("http://")) {
+                    scheme = "http";
+                    hostOnly = rawHost.substring(7);
+                } else {
+                    scheme = "http";
+                    hostOnly = rawHost;
+                }
+                HttpHost proxy = new HttpHost(scheme, hostOnly, config.getProxyPort());
                 DefaultProxyRoutePlanner routePlanner = new DefaultProxyRoutePlanner(proxy);
                 builder.setRoutePlanner(routePlanner);
                 
-                Config.debugLog(config, "Configuring HTTP proxy: " + config.getProxyHost() + ":" + config.getProxyPort());
+                Config.debugLog(config, "Configuring HTTP proxy: " + scheme + "://" + hostOnly + ":" + config.getProxyPort());
                 
                 // Add proxy authentication if credentials provided
                 if (config.getProxyUser() != null && !config.getProxyUser().isEmpty()) {
@@ -76,6 +92,10 @@ public class HttpProfile implements C2Profile {
                     builder.setDefaultCredentialsProvider(credsProvider);
                     Config.debugLog(config, "Proxy authentication configured for user: " + config.getProxyUser());
                 }
+            } else {
+                // No Mythic proxy configured - respect system proxy settings
+                builder.setRoutePlanner(new SystemDefaultRoutePlanner(ProxySelector.getDefault()));
+                Config.debugLog(config, "No Mythic proxy set, using system proxy settings");
             }
             
             return builder.build();
